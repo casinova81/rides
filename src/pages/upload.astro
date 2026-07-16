@@ -1,0 +1,153 @@
+---
+import Layout from '../layouts/Layout.astro';
+
+// The upload page (issue 06). Static shell — all the work is client-side: the
+// browser parses each dropped GPX, derives the payload with the ticket-2
+// pipeline, and POSTs raw GPX + payload to /api/upload one ride at a time,
+// auto-saving with no review step. Results render per file below.
+---
+
+<Layout title="Upload rides — Ride Tracker" nav="upload">
+  <main class="wrap">
+    <h1>Upload rides</h1>
+    <p class="sub">Drop Komoot GPX exports — they save automatically, one by one.</p>
+
+    <label id="dropzone" class="dropzone" for="file-input">
+      <input id="file-input" type="file" accept=".gpx,application/gpx+xml" multiple hidden />
+      <div class="dz-icon" aria-hidden="true">↑</div>
+      <div class="dz-title">Drop GPX files here</div>
+      <div class="dz-hint">or tap to choose files</div>
+    </label>
+
+    <div id="results" class="results" aria-live="polite"></div>
+  </main>
+</Layout>
+
+<script>
+  import { deriveRide, summaryOf } from '../lib/derive';
+  import { rideCardHTML } from '../lib/ride-card';
+  import { escapeHtml } from '../lib/html';
+  import type { UploadResult } from '../lib/upload-store';
+  import type { RecordKey, IndexSummary } from '../lib/types';
+
+  const RECORD_LABELS: Record<RecordKey, string> = {
+    longestDistance: 'Longest distance',
+    mostElevationGain: 'Most elevation gain',
+    fastest5k: 'Fastest 5 km',
+    fastest10k: 'Fastest 10 km',
+    fastest20k: 'Fastest 20 km',
+    fastestAvgSpeed: 'Fastest avg speed',
+    maxSpeed: 'Top speed',
+    longestMovingTime: 'Longest moving time',
+  };
+
+  const dropzone = document.getElementById('dropzone') as HTMLLabelElement;
+  const input = document.getElementById('file-input') as HTMLInputElement;
+  const results = document.getElementById('results') as HTMLDivElement;
+
+  let busy = false;
+
+  function calloutHTML(broken: RecordKey[]): string {
+    if (broken.length === 0) return '';
+    const names = broken.map((k) => RECORD_LABELS[k]).join(', ');
+    return `<div class="callout">🏆 New record: ${escapeHtml(names)}</div>`;
+  }
+
+  function renderSuccess(el: HTMLElement, result: UploadResult, summary: IndexSummary): void {
+    const outcome =
+      result.outcome === 'overwritten'
+        ? `Overwrote <strong>${escapeHtml(result.overwrote?.name ?? '')}</strong>`
+        : 'Saved';
+    el.className = `result ${result.outcome}`;
+    el.innerHTML = `
+      <div class="result-head">
+        <span class="badge">${result.outcome}</span>
+        <span class="result-msg">${outcome}</span>
+      </div>
+      ${calloutHTML(result.brokenRecords)}
+      ${rideCardHTML(summary, { holdsRecord: result.heldRecords.length > 0 })}`;
+  }
+
+  function renderFailure(el: HTMLElement, fileName: string, reason: string): void {
+    el.className = 'result failed';
+    el.innerHTML = `
+      <div class="result-head">
+        <span class="badge">failed</span>
+        <span class="result-msg">${escapeHtml(fileName)}</span>
+      </div>
+      <div class="fail-reason">${escapeHtml(reason)}</div>`;
+  }
+
+  async function processFile(file: File): Promise<void> {
+    const el = document.createElement('div');
+    el.className = 'result pending';
+    el.innerHTML = `<div class="result-head"><span class="badge">…</span><span class="result-msg">${escapeHtml(file.name)}</span></div>`;
+    results.appendChild(el);
+
+    try {
+      const gpxText = await file.text();
+      const { payload, polyline } = deriveRide(gpxText);
+
+      const res = await fetch('/api/upload', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ gpxText, payload, polyline }),
+      });
+
+      if (!res.ok) {
+        let reason = `server responded ${res.status}`;
+        try {
+          const body = (await res.json()) as { error?: string };
+          if (body?.error) reason = body.error;
+        } catch {
+          /* non-JSON error body — keep the status line */
+        }
+        renderFailure(el, file.name, reason);
+        return;
+      }
+
+      const result = (await res.json()) as UploadResult;
+      // Link the card to the id the server actually assigned (may carry a -2 suffix).
+      const summary: IndexSummary = { ...summaryOf(payload, polyline), id: result.id };
+      renderSuccess(el, result, summary);
+    } catch (err) {
+      // A bad file never blocks the batch — record it and move on.
+      renderFailure(el, file.name, err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function processFiles(files: FileList | File[]): Promise<void> {
+    const list = Array.from(files).filter((f) => f.name.toLowerCase().endsWith('.gpx'));
+    if (list.length === 0 || busy) return;
+    busy = true;
+    dropzone.classList.add('busy');
+    for (const file of list) {
+      await processFile(file); // sequential: one ride at a time (issue 06)
+    }
+    busy = false;
+    dropzone.classList.remove('busy');
+    input.value = ''; // allow re-selecting the same file
+  }
+
+  input.addEventListener('change', () => {
+    if (input.files) void processFiles(input.files);
+  });
+
+  // Drag-and-drop on desktop; the label already opens the picker on tap/click.
+  for (const evt of ['dragenter', 'dragover'] as const) {
+    dropzone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      dropzone.classList.add('over');
+    });
+  }
+  for (const evt of ['dragleave', 'drop'] as const) {
+    dropzone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('over');
+    });
+  }
+  dropzone.addEventListener('drop', (e) => {
+    const files = e.dataTransfer?.files;
+    if (files) void processFiles(files);
+  });
+</script>

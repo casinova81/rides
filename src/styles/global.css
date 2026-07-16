@@ -177,3 +177,176 @@ details.more summary {
 .topnav a.navlink:hover {
   color: var(--ink-1);
 }
+
+/* shared ride card (issue 04) — used by upload results and the dashboard/library */
+.ride-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+}
+.ride-card {
+  display: flex;
+  gap: 12px;
+  padding: 10px;
+  text-decoration: none;
+  color: inherit;
+  align-items: center;
+}
+.ride-card:hover {
+  border-color: var(--ink-2);
+}
+.rc-thumb {
+  position: relative;
+  flex: 0 0 auto;
+  width: 96px;
+  height: 64px;
+}
+.rc-thumb .thumb {
+  width: 96px;
+  height: 64px;
+  display: block;
+}
+.rc-thumb .trophy {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  font-size: 14px;
+}
+.rc-body {
+  min-width: 0;
+  flex: 1;
+}
+.rc-name {
+  font-weight: 600;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rc-date {
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+.rc-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 10px;
+}
+.rc-stat {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+.rc-stat .rc-v {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.rc-stat .rc-l {
+  color: var(--muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+/* upload drop zone + results (issue 06) */
+.dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 16px;
+  padding: 40px 16px;
+  border: 2px dashed var(--baseline);
+  border-radius: 14px;
+  background: var(--surface-1);
+  cursor: pointer;
+  text-align: center;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+.dropzone:hover,
+.dropzone.over {
+  border-color: var(--accent);
+  background: #fff;
+}
+.dropzone.busy {
+  opacity: 0.6;
+  pointer-events: none;
+}
+.dropzone .dz-icon {
+  font-size: 28px;
+  color: var(--ink-2);
+}
+.dropzone .dz-title {
+  font-weight: 600;
+}
+.dropzone .dz-hint {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.results {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 20px;
+}
+.result {
+  border-left: 3px solid var(--baseline);
+  padding-left: 12px;
+}
+.result.saved {
+  border-left-color: #2e7d32;
+}
+.result.overwritten {
+  border-left-color: var(--gold);
+}
+.result.failed {
+  border-left-color: var(--danger);
+}
+.result-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.result .badge {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--grid);
+  color: var(--ink-2);
+}
+.result.saved .badge {
+  background: #e3f1e4;
+  color: #2e7d32;
+}
+.result.overwritten .badge {
+  background: #f6ecd0;
+  color: #8a6d0b;
+}
+.result.failed .badge {
+  background: #f7e0dd;
+  color: var(--danger);
+}
+.result-msg {
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.callout {
+  font-size: 13px;
+  color: #8a6d0b;
+  background: #f6ecd0;
+  border-radius: 8px;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+}
+.fail-reason {
+  font-size: 13px;
+  color: var(--danger);
+}
