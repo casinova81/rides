@@ -1,0 +1,317 @@
+<!doctype html>
+<!-- PROTOTYPE — THROWAWAY. Wayfinder ticket 07 (playback camera). Delete after the verdict is recorded. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PROTOTYPE: playback camera — airport.gpx</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.css">
+<script src="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
+<style>
+  html, body { margin: 0; height: 100%; font-family: system-ui, sans-serif; }
+  #map { position: absolute; inset: 0; }
+  .panel {
+    position: absolute; z-index: 10; background: rgba(20,22,26,.88); color: #eee;
+    border-radius: 10px; padding: 10px 12px; font-size: 13px; backdrop-filter: blur(4px);
+  }
+  #controls { left: 50%; transform: translateX(-50%); bottom: 12px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; max-width: 95vw; }
+  #controls .group { display: flex; gap: 6px; align-items: center; }
+  button { background: #2e3440; color: #eee; border: 1px solid #4a5160; border-radius: 6px; padding: 5px 10px; cursor: pointer; font-size: 13px; }
+  button.active { background: #4c9aff; border-color: #4c9aff; color: #fff; }
+  button:hover { border-color: #8aa; }
+  #state { top: 12px; right: 12px; font-family: ui-monospace, monospace; font-size: 12px; line-height: 1.5; min-width: 230px; }
+  #tuning { top: 12px; left: 12px; width: 250px; }
+  #tuning label { display: grid; grid-template-columns: 1fr auto; gap: 6px; margin: 6px 0 2px; }
+  #tuning input[type=range] { width: 100%; }
+  #tuning .val { font-family: ui-monospace, monospace; color: #9fd; }
+  #tuning details { margin-top: 4px; }
+  #scrub { width: 320px; }
+  .tag { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 10;
+         background: #b3261e; color: #fff; font-size: 11px; padding: 3px 10px; border-radius: 999px; letter-spacing: .5px; }
+  #loading { position: absolute; inset: 0; z-index: 20; display: grid; place-items: center; background: #14161a; color: #eee; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="tag">PROTOTYPE — throwaway (wayfinder ticket 07)</div>
+<div id="loading">Loading airport.gpx + tiles…</div>
+
+<div id="tuning" class="panel">
+  <strong>Tuning</strong>
+  <label>position smoothing τ <span class="val" id="v-tau"></span></label>
+  <input type="range" id="tau" min="0" max="2" step="0.05" value="0.6">
+  <label>bearing smoothing τ <span class="val" id="v-btau"></span></label>
+  <input type="range" id="btau" min="0" max="3" step="0.05" value="1.2">
+  <details open>
+    <summary>chase cam</summary>
+    <label>distance behind (m) <span class="val" id="v-dist"></span></label>
+    <input type="range" id="dist" min="30" max="400" step="5" value="130">
+    <label>height above (m) <span class="val" id="v-height"></span></label>
+    <input type="range" id="height" min="10" max="250" step="5" value="55">
+  </details>
+  <details open>
+    <summary>3D tilt</summary>
+    <label>pitch (°) <span class="val" id="v-pitch3d"></span></label>
+    <input type="range" id="pitch3d" min="20" max="75" step="1" value="55">
+    <label>zoom <span class="val" id="v-zoom3d"></span></label>
+    <input type="range" id="zoom3d" min="11" max="17" step="0.1" value="14.5">
+    <label><span>rotate with heading</span><input type="checkbox" id="rot3d"></label>
+  </details>
+  <details>
+    <summary>2D follow</summary>
+    <label>zoom <span class="val" id="v-zoom2d"></span></label>
+    <input type="range" id="zoom2d" min="11" max="17" step="0.1" value="14.8">
+  </details>
+  <label>terrain exaggeration <span class="val" id="v-exag"></span></label>
+  <input type="range" id="exag" min="0" max="2.5" step="0.1" value="1">
+</div>
+
+<div id="state" class="panel">
+  <strong>State</strong>
+  <div id="state-body">–</div>
+</div>
+
+<div id="controls" class="panel">
+  <div class="group">
+    <button id="play">▶</button>
+    <button id="restart">⟲</button>
+  </div>
+  <div class="group" id="speeds">
+    <button data-s="10">10×</button>
+    <button data-s="50" class="active">50×</button>
+    <button data-s="200">200×</button>
+    <button data-s="500">500×</button>
+  </div>
+  <div class="group" id="modes">
+    <button data-m="follow2d" class="active">2D follow</button>
+    <button data-m="tilt3d">3D tilt</button>
+    <button data-m="chase">Chase cam</button>
+  </div>
+  <input type="range" id="scrub" min="0" max="1000" value="0">
+</div>
+
+<script>
+"use strict";
+// ---------- GPX loading & sampling ----------
+const R = 6371000, D2R = Math.PI / 180;
+let pts = null; // {lat, lon, ele, t (s from start), d (cum meters)}[]
+let duration = 0, totalDist = 0;
+
+function haversine(a, b) {
+  const dLat = (b.lat - a.lat) * D2R, dLon = (b.lon - a.lon) * D2R;
+  const s = Math.sin(dLat/2)**2 + Math.cos(a.lat*D2R) * Math.cos(b.lat*D2R) * Math.sin(dLon/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+function bearingBetween(a, b) {
+  const y = Math.sin((b.lon-a.lon)*D2R) * Math.cos(b.lat*D2R);
+  const x = Math.cos(a.lat*D2R)*Math.sin(b.lat*D2R) - Math.sin(a.lat*D2R)*Math.cos(b.lat*D2R)*Math.cos((b.lon-a.lon)*D2R);
+  return (Math.atan2(y, x) / D2R + 360) % 360;
+}
+function offset(p, bearingDeg, meters) { // destination point
+  const br = bearingDeg * D2R, dr = meters / R, la = p.lat * D2R;
+  const lat2 = Math.asin(Math.sin(la)*Math.cos(dr) + Math.cos(la)*Math.sin(dr)*Math.cos(br));
+  const lon2 = p.lon*D2R + Math.atan2(Math.sin(br)*Math.sin(dr)*Math.cos(la), Math.cos(dr) - Math.sin(la)*Math.sin(lat2));
+  return { lat: lat2/D2R, lon: lon2/D2R };
+}
+function bsearch(arr, key, v) { // last index with arr[i][key] <= v
+  let lo = 0, hi = arr.length - 1;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (arr[mid][key] <= v) lo = mid; else hi = mid - 1; }
+  return lo;
+}
+function lerpPt(i, frac) {
+  const a = pts[i], b = pts[Math.min(i+1, pts.length-1)];
+  return { lat: a.lat + (b.lat-a.lat)*frac, lon: a.lon + (b.lon-a.lon)*frac,
+           ele: a.ele + (b.ele-a.ele)*frac, d: a.d + (b.d-a.d)*frac };
+}
+function sampleByTime(t) {
+  t = Math.max(0, Math.min(duration, t));
+  const i = bsearch(pts, 't', t);
+  const a = pts[i], b = pts[Math.min(i+1, pts.length-1)];
+  const frac = b.t > a.t ? (t - a.t) / (b.t - a.t) : 0;
+  return lerpPt(i, frac);
+}
+function sampleByDist(d) {
+  d = Math.max(0, Math.min(totalDist, d));
+  const i = bsearch(pts, 'd', d);
+  const a = pts[i], b = pts[Math.min(i+1, pts.length-1)];
+  const frac = b.d > a.d ? (d - a.d) / (b.d - a.d) : 0;
+  return lerpPt(i, frac);
+}
+// max GPX elevation in a distance window — used to clamp chase-cam altitude
+// (queryTerrainElevation is unreliable per maplibre #6701; collision unhandled per #1542)
+function maxEleAround(d, halfWin) {
+  const i0 = bsearch(pts, 'd', Math.max(0, d - halfWin));
+  const i1 = bsearch(pts, 'd', Math.min(totalDist, d + halfWin));
+  let m = -Infinity;
+  for (let i = i0; i <= i1; i++) m = Math.max(m, pts[i].ele);
+  return m;
+}
+
+async function loadGpx() {
+  const txt = await (await fetch('/airport.gpx')).text();
+  const doc = new DOMParser().parseFromString(txt, 'application/xml');
+  const nodes = [...doc.getElementsByTagName('trkpt')];
+  let t0 = null, cum = 0, prev = null;
+  pts = nodes.map(n => {
+    const p = {
+      lat: +n.getAttribute('lat'), lon: +n.getAttribute('lon'),
+      ele: +(n.getElementsByTagName('ele')[0]?.textContent ?? 0),
+      time: new Date(n.getElementsByTagName('time')[0].textContent).getTime() / 1000,
+    };
+    if (t0 === null) t0 = p.time;
+    p.t = p.time - t0;
+    if (prev) cum += haversine(prev, p);
+    p.d = cum;
+    prev = p;
+    return p;
+  });
+  duration = pts[pts.length-1].t;
+  totalDist = cum;
+}
+
+// ---------- Map ----------
+const map = new maplibregl.Map({
+  container: 'map',
+  style: 'https://tiles.openfreemap.org/styles/liberty',
+  center: [13.4756, 52.5027], zoom: 12, maxPitch: 85, attributionControl: { compact: true },
+});
+
+const markerEl = document.createElement('div');
+markerEl.style.cssText = 'width:22px;height:22px;display:grid;place-items:center;';
+markerEl.innerHTML = '<div style="width:0;height:0;border-left:8px solid transparent;border-right:8px solid transparent;border-bottom:20px solid #ff3b30;filter:drop-shadow(0 1px 3px rgba(0,0,0,.6))"></div>';
+const marker = new maplibregl.Marker({ element: markerEl, rotationAlignment: 'map', pitchAlignment: 'map' });
+
+map.on('load', async () => {
+  await loadGpx();
+  map.addSource('dem', { type: 'raster-dem', url: 'https://tiles.mapterhorn.com/tilejson.json', encoding: 'terrarium' });
+  map.addLayer({ id: 'hillshade', type: 'hillshade', source: 'dem', paint: { 'hillshade-exaggeration': 0.35 } });
+  map.addSource('track', { type: 'geojson', data: {
+    type: 'Feature', geometry: { type: 'LineString', coordinates: pts.map(p => [p.lon, p.lat]) } } });
+  map.addLayer({ id: 'track', type: 'line', source: 'track',
+    paint: { 'line-color': '#e6413c', 'line-width': 3.5, 'line-opacity': 0.85 } });
+  marker.setLngLat([pts[0].lon, pts[0].lat]).addTo(map);
+  const b = pts.reduce((bb, p) => bb.extend([p.lon, p.lat]), new maplibregl.LngLatBounds(pts[0], pts[0]));
+  map.fitBounds(b, { padding: 60, duration: 0 });
+  document.getElementById('loading').remove();
+  requestAnimationFrame(frame);
+});
+
+// ---------- Playback state ----------
+const S = {
+  playing: false, speed: 50, mode: 'follow2d', vt: 0,
+  smooth: null, smoothEle: 0, bearVec: null, // smoothed state
+  terrainOn: false, clamped: false,
+};
+const els = Object.fromEntries(['tau','btau','dist','height','pitch3d','zoom3d','rot3d','zoom2d','exag','scrub','play']
+  .map(id => [id, document.getElementById(id)]));
+const P = () => ({ // live tuning params
+  tau: +els.tau.value, btau: +els.btau.value,
+  dist: +els.dist.value, height: +els.height.value,
+  pitch3d: +els.pitch3d.value, zoom3d: +els.zoom3d.value, rot3d: els.rot3d.checked,
+  zoom2d: +els.zoom2d.value, exag: +els.exag.value,
+});
+function showVals() {
+  const p = P();
+  for (const [id, v] of [['v-tau', p.tau+' s'], ['v-btau', p.btau+' s'], ['v-dist', p.dist+' m'],
+    ['v-height', p.height+' m'], ['v-pitch3d', p.pitch3d+'°'], ['v-zoom3d', p.zoom3d],
+    ['v-zoom2d', p.zoom2d], ['v-exag', p.exag]])
+    document.getElementById(id).textContent = v;
+}
+document.querySelectorAll('#tuning input').forEach(i => i.addEventListener('input', showVals));
+showVals();
+
+function setTerrain(on) {
+  if (on) map.setTerrain({ source: 'dem', exaggeration: P().exag });
+  else map.setTerrain(null);
+  S.terrainOn = on;
+}
+els.exag.addEventListener('input', () => { if (S.terrainOn) setTerrain(true); });
+
+document.getElementById('play').onclick = () => {
+  S.playing = !S.playing;
+  els.play.textContent = S.playing ? '⏸' : '▶';
+};
+document.getElementById('restart').onclick = () => { S.vt = 0; S.smooth = null; S.bearVec = null; };
+document.getElementById('speeds').onclick = e => {
+  if (!e.target.dataset.s) return;
+  S.speed = +e.target.dataset.s;
+  document.querySelectorAll('#speeds button').forEach(b => b.classList.toggle('active', b === e.target));
+};
+document.getElementById('modes').onclick = e => {
+  if (!e.target.dataset.m) return;
+  S.mode = e.target.dataset.m;
+  document.querySelectorAll('#modes button').forEach(b => b.classList.toggle('active', b === e.target));
+  setTerrain(S.mode !== 'follow2d');
+};
+els.scrub.addEventListener('input', () => {
+  S.vt = (+els.scrub.value / 1000) * duration;
+  S.smooth = null; S.bearVec = null;
+});
+
+// ---------- Frame loop ----------
+let lastTs = null;
+function frame(ts) {
+  requestAnimationFrame(frame);
+  if (!pts) return;
+  const dt = lastTs === null ? 0.016 : Math.min(0.1, (ts - lastTs) / 1000);
+  lastTs = ts;
+  if (S.playing) {
+    S.vt += dt * S.speed;
+    if (S.vt >= duration) { S.vt = duration; S.playing = false; els.play.textContent = '▶'; }
+    els.scrub.value = Math.round(S.vt / duration * 1000);
+  }
+  const p = P();
+  const pos = sampleByTime(S.vt);
+
+  // position smoothing: exponential toward raw position
+  const k = p.tau > 0 ? 1 - Math.exp(-dt / p.tau) : 1;
+  if (!S.smooth) { S.smooth = { lat: pos.lat, lon: pos.lon }; S.smoothEle = pos.ele; }
+  S.smooth.lat += (pos.lat - S.smooth.lat) * k;
+  S.smooth.lon += (pos.lon - S.smooth.lon) * k;
+  S.smoothEle += (pos.ele - S.smoothEle) * k;
+
+  // bearing from 25 m look-ahead along the track, circularly smoothed
+  const ahead = sampleByDist(pos.d + 25);
+  const rawBear = bearingBetween(pos, ahead);
+  const bk = p.btau > 0 ? 1 - Math.exp(-dt / p.btau) : 1;
+  const tv = { x: Math.sin(rawBear * D2R), y: Math.cos(rawBear * D2R) };
+  if (!S.bearVec) S.bearVec = tv;
+  S.bearVec.x += (tv.x - S.bearVec.x) * bk;
+  S.bearVec.y += (tv.y - S.bearVec.y) * bk;
+  const bear = (Math.atan2(S.bearVec.x, S.bearVec.y) / D2R + 360) % 360;
+
+  marker.setLngLat([S.smooth.lon, S.smooth.lat]).setRotation(bear);
+
+  const center = new maplibregl.LngLat(S.smooth.lon, S.smooth.lat);
+  S.clamped = false;
+  let camInfo = '';
+  if (S.mode === 'follow2d') {
+    map.jumpTo({ center, zoom: p.zoom2d, pitch: 0, bearing: 0 });
+    camInfo = `zoom ${p.zoom2d}`;
+  } else if (S.mode === 'tilt3d') {
+    map.jumpTo({ center, zoom: p.zoom3d, pitch: p.pitch3d, bearing: p.rot3d ? bear : 0 });
+    camInfo = `zoom ${p.zoom3d} pitch ${p.pitch3d}°`;
+  } else { // chase: camera behind the marker along reverse bearing, altitude clamped from GPX elevations
+    const camGround = offset(S.smooth, (bear + 180) % 360, p.dist);
+    let camAlt = S.smoothEle + p.height;
+    const minAlt = maxEleAround(Math.max(0, pos.d - p.dist), 60) + 12;
+    if (camAlt < minAlt) { camAlt = minAlt; S.clamped = true; }
+    const opts = map.calculateCameraOptionsFromTo(
+      new maplibregl.LngLat(camGround.lon, camGround.lat), camAlt, center, S.smoothEle);
+    map.jumpTo(opts);
+    camInfo = `zoom ${opts.zoom?.toFixed(2)} pitch ${opts.pitch?.toFixed(1)}° alt ${camAlt.toFixed(0)}m${S.clamped ? ' (CLAMPED)' : ''}`;
+  }
+
+  const hh = String(Math.floor(S.vt/3600)).padStart(2,'0'), mm = String(Math.floor(S.vt/60)%60).padStart(2,'0'), ss = String(Math.floor(S.vt)%60).padStart(2,'0');
+  document.getElementById('state-body').innerHTML =
+    `mode: <b>${S.mode}</b><br>` +
+    `ride time: ${hh}:${mm}:${ss} / ${(duration/3600).toFixed(2)} h<br>` +
+    `distance: ${(pos.d/1000).toFixed(2)} / ${(totalDist/1000).toFixed(1)} km<br>` +
+    `speed: ${S.speed}× ${S.playing ? '▶' : '⏸'}<br>` +
+    `ele: ${pos.ele.toFixed(0)} m &nbsp; bearing: ${bear.toFixed(0)}°<br>` +
+    `cam: ${camInfo}<br>` +
+    `terrain: ${S.terrainOn ? 'on ×' + P().exag : 'off'}`;
+}
+</script>
+</body>
+</html>

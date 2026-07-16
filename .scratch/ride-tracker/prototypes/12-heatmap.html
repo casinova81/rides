@@ -1,0 +1,555 @@
+<!doctype html>
+<!-- PROTOTYPE — THROWAWAY. Wayfinder ticket 12 (heatmap rendering).
+     Three variants of the full-screen everywhere-I've-ridden heatmap, switchable via ?variant=A|B|C
+     (floating bottom bar / arrow keys). Synthetic archive derived from /airport.gpx.
+     Delete after the verdict is recorded on the ticket. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PROTOTYPE: heatmap rendering — ticket 12</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.css">
+<script src="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
+<style>
+  html, body { margin: 0; height: 100%; font-family: system-ui, sans-serif; }
+  #map { position: absolute; inset: 0; }
+  .panel {
+    position: absolute; z-index: 10; background: rgba(20,22,26,.88); color: #eee;
+    border-radius: 10px; padding: 10px 12px; font-size: 13px; backdrop-filter: blur(4px);
+  }
+  button { background: #2e3440; color: #eee; border: 1px solid #4a5160; border-radius: 6px; padding: 5px 10px; cursor: pointer; font-size: 13px; }
+  button.active { background: #4c9aff; border-color: #4c9aff; color: #fff; }
+  button:hover { border-color: #8aa; }
+  #tuning { top: 12px; left: 12px; width: 260px; max-height: calc(100vh - 90px); overflow-y: auto; }
+  #tuning label { display: grid; grid-template-columns: 1fr auto; gap: 6px; margin: 6px 0 2px; align-items: center; }
+  #tuning input[type=range] { width: 100%; }
+  #tuning .val { font-family: ui-monospace, monospace; color: #9fd; }
+  #tuning .row { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
+  #tuning hr { border: none; border-top: 1px solid #3a4150; margin: 10px 0 6px; }
+  #tuning .note { color: #9aa3b2; font-size: 11.5px; line-height: 1.4; margin-top: 4px; }
+  #state { top: 12px; right: 12px; font-family: ui-monospace, monospace; font-size: 12px; line-height: 1.6; min-width: 220px; }
+  #state b { color: #9fd; font-weight: 600; }
+  .tag { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 10;
+         background: #b3261e; color: #fff; font-size: 11px; padding: 3px 10px; border-radius: 999px; letter-spacing: .5px; }
+  #loading { position: absolute; inset: 0; z-index: 20; display: grid; place-items: center; background: #14161a; color: #eee; }
+  #switcher { left: 50%; transform: translateX(-50%); bottom: 14px; display: flex; gap: 10px; align-items: center;
+              border: 1px solid #4c9aff; box-shadow: 0 4px 18px rgba(0,0,0,.5); }
+  #switcher .name { min-width: 260px; text-align: center; font-weight: 600; }
+  #switcher .hint { color: #9aa3b2; font-size: 11px; font-weight: 400; }
+  #tooltip { display: none; position: absolute; z-index: 15; pointer-events: none; background: rgba(20,22,26,.92);
+             color: #fff; font-size: 12px; padding: 5px 8px; border-radius: 6px; white-space: nowrap; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="tag">PROTOTYPE — throwaway (wayfinder ticket 12)</div>
+<div id="loading">Building synthetic ride archive from airport.gpx…</div>
+<div id="tooltip"></div>
+
+<div id="tuning" class="panel">
+  <strong>Tuning</strong>
+  <div class="row" id="basemaps">
+    <button data-style="dark" class="active">dark</button>
+    <button data-style="light">light</button>
+    <button data-style="full">full map</button>
+  </div>
+  <label>rides in archive <span class="val" id="v-rides"></span></label>
+  <input type="range" id="rides" min="0" max="5" step="1" value="3">
+  <label><span>hover identifies ride</span><input type="checkbox" id="hover" checked></label>
+
+  <div class="var-A">
+    <hr><strong>A — glow stack</strong>
+    <label>line opacity <span class="val" id="v-aop"></span></label>
+    <input type="range" id="aop" min="0.02" max="0.5" step="0.01" value="0.12">
+    <label>line width <span class="val" id="v-awidth"></span></label>
+    <input type="range" id="awidth" min="0.5" max="5" step="0.1" value="1.6">
+    <label><span>outer glow layer</span><input type="checkbox" id="aglow" checked></label>
+    <div class="row" id="acolors"></div>
+    <div class="note">One layer, every ride semi-transparent. Overlap alpha-stacks: repeated roads glow brighter on their own.</div>
+  </div>
+
+  <div class="var-B">
+    <hr><strong>B — heatmap layer</strong>
+    <label>radius (px) <span class="val" id="v-brad"></span></label>
+    <input type="range" id="brad" min="2" max="30" step="1" value="8">
+    <label>intensity <span class="val" id="v-bint"></span></label>
+    <input type="range" id="bint" min="0.01" max="1" step="0.01" value="0.03">
+    <label>point spacing (m) <span class="val" id="v-bstep"></span></label>
+    <input type="range" id="bstep" min="20" max="100" step="10" value="40">
+    <div class="row ramp-buttons" data-for="B"></div>
+    <div class="note">MapLibre's density heatmap over resampled points. Fully ambient blur — no crisp road lines.</div>
+  </div>
+
+  <div class="var-C">
+    <hr><strong>C — binned segments</strong>
+    <label>cell size (m) <span class="val" id="v-ccell"></span></label>
+    <input type="range" id="ccell" min="15" max="60" step="5" value="25">
+    <label>line width <span class="val" id="v-cwidth"></span></label>
+    <input type="range" id="cwidth" min="1" max="6" step="0.5" value="2.5">
+    <label><span>log intensity scale</span><input type="checkbox" id="clog" checked></label>
+    <div class="row ramp-buttons" data-for="C"></div>
+    <div class="note">Segments snapped to a grid, counted per ride, colored by count. Crisp Strava-style network; counts are precomputable.</div>
+  </div>
+</div>
+
+<div id="state" class="panel">
+  <strong>State</strong>
+  <div id="state-body">–</div>
+</div>
+
+<div id="switcher" class="panel">
+  <button id="prev">←</button>
+  <div class="name"><span id="vname"></span><br><span class="hint">←/→ keys switch · ?variant= in URL</span></div>
+  <button id="next">→</button>
+</div>
+
+<script>
+'use strict';
+
+// ---------- variants ----------
+const VARIANTS = {
+  A: 'Glow stack (additive lines)',
+  B: 'Heatmap layer (density blur)',
+  C: 'Binned segments (intensity ramp)',
+};
+const ORDER = ['A', 'B', 'C'];
+let variant = new URLSearchParams(location.search).get('variant');
+if (!VARIANTS[variant]) variant = 'A';
+
+const STYLES = {
+  dark:  'https://tiles.openfreemap.org/styles/dark',
+  light: 'https://tiles.openfreemap.org/styles/positron',
+  full:  'https://tiles.openfreemap.org/styles/liberty',
+};
+
+const RIDE_STEPS = [10, 25, 50, 100, 200, 400];
+
+const RAMPS = {
+  strava: { line0: 'rgba(139,0,0,0.55)',   stops: [[0.25,'#8b0000'],[0.5,'#ff3b00'],[0.75,'#ff9d00'],[1,'#ffffff']] },
+  fire:   { line0: 'rgba(66,10,104,0.55)', stops: [[0.15,'#420a68'],[0.35,'#932667'],[0.55,'#dd513a'],[0.78,'#fca50a'],[1,'#fcffa4']] },
+  ice:    { line0: 'rgba(18,59,109,0.6)',  stops: [[0.25,'#123b6d'],[0.5,'#1e88e5'],[0.78,'#4fc3f7'],[1,'#eaffff']] },
+};
+const A_COLORS = ['#ff6d00', '#00e5ff', '#ff2d95', '#ffd600', '#ffffff'];
+
+const cfg = {
+  rides: 100,
+  hover: true,
+  aop: 0.12, awidth: 1.6, aglow: true, acolor: '#ff6d00',
+  brad: 8, bint: 0.03, bstep: 40, bramp: 'strava',
+  ccell: 25, cwidth: 2.5, clog: true, cramp: 'strava',
+};
+
+// ---------- seeded rng ----------
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+// ---------- geometry ----------
+let lon0 = 0, lat0 = 0, mLon = 1, mLat = 111320;
+function toXY([lon, lat]) { return [(lon - lon0) * mLon, (lat - lat0) * mLat]; }
+function toLL([x, y]) { return [+(lon0 + x / mLon).toFixed(6), +(lat0 + y / mLat).toFixed(6)]; }
+
+function parseGPX(txt) {
+  const doc = new DOMParser().parseFromString(txt, 'application/xml');
+  return [...doc.querySelectorAll('trkpt')].map(p => [+p.getAttribute('lon'), +p.getAttribute('lat')]);
+}
+
+// Douglas-Peucker in meter space
+function simplifyDP(pts, tol) {
+  const keep = new Uint8Array(pts.length);
+  keep[0] = keep[pts.length - 1] = 1;
+  const stack = [[0, pts.length - 1]];
+  while (stack.length) {
+    const [a, b] = stack.pop();
+    if (b - a < 2) continue;
+    const [ax, ay] = pts[a], [bx, by] = pts[b];
+    const dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy;
+    let maxD = -1, maxI = -1;
+    for (let i = a + 1; i < b; i++) {
+      const [px, py] = pts[i];
+      let d;
+      if (len2 === 0) d = Math.hypot(px - ax, py - ay);
+      else {
+        const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2));
+        d = Math.hypot(px - ax - t * dx, py - ay - t * dy);
+      }
+      if (d > maxD) { maxD = d; maxI = i; }
+    }
+    if (maxD > tol) { keep[maxI] = 1; stack.push([a, maxI], [maxI, b]); }
+  }
+  return pts.filter((_, i) => keep[i]);
+}
+
+function perpDirs(pts) {
+  const dirs = [];
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[Math.max(0, i - 1)], q = pts[Math.min(pts.length - 1, i + 1)];
+    const dx = q[0] - p[0], dy = q[1] - p[1], l = Math.hypot(dx, dy) || 1;
+    dirs.push([-dy / l, dx / l]);
+  }
+  return dirs;
+}
+
+function resample(pts, step) {
+  const out = [pts[0]];
+  let carry = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const [ax, ay] = pts[i - 1], [bx, by] = pts[i];
+    const seg = Math.hypot(bx - ax, by - ay);
+    let d = step - carry;
+    while (d < seg) { const t = d / seg; out.push([ax + (bx - ax) * t, ay + (by - ay) * t]); d += step; }
+    carry = (carry + seg) % step;
+  }
+  out.push(pts[pts.length - 1]);
+  return out;
+}
+
+// ---------- synthetic archive ----------
+// Templates = distinct "roads I ride": sub-ranges of the real track pushed sideways with a
+// smooth branch-and-rejoin offset. Popularity is zipf-ish so heat varies between corridors.
+let templates = [];
+function buildTemplates(baseRaw) {
+  const base = resample(baseRaw, 50); // dense spacing so lateral offsets curve smoothly
+  const dirs = perpDirs(base);
+  const mk = (name, a, b, amp, freq, phase, weight) => {
+    const i0 = Math.floor(a * (base.length - 1)), i1 = Math.ceil(b * (base.length - 1));
+    const pts = [];
+    for (let i = i0; i <= i1; i++) {
+      const t = (i - i0) / Math.max(1, i1 - i0);
+      const off = amp * Math.sin(Math.PI * t) * (0.75 + 0.25 * Math.sin(freq * Math.PI * t + phase));
+      pts.push([base[i][0] + dirs[i][0] * off, base[i][1] + dirs[i][1] * off]);
+    }
+    return { name, pts, weight };
+  };
+  templates = [
+    mk('Airport loop',   0, 1,      0,   0, 0,   30),
+    mk('North spur',     0, 0.55,  260,  3, 0.4, 18),
+    mk('River variant',  0.3, 1,  -380,  2, 1.1, 14),
+    mk('Long way round', 0, 1,     640,  3, 2.0, 10),
+    mk('Forest cut',     0.15, 0.75, -820, 2, 0.2, 9),
+    mk('East detour',    0.5, 1,   1250, 3, 1.7, 7),
+    mk('Short hop',      0, 0.35, -160,  2, 2.6, 6),
+    mk('Far loop',       0.2, 0.9, 1900, 2, 0.9, 6),
+  ];
+}
+
+let rides = []; // {id, name, km, xy, coords}
+function genRides(n) {
+  const rnd = mulberry32(42);
+  const totalW = templates.reduce((s, t) => s + t.weight, 0);
+  rides = [];
+  for (let r = 0; r < n; r++) {
+    let pick = rnd() * totalW, tpl = templates[0];
+    for (const t of templates) { pick -= t.weight; if (pick <= 0) { tpl = t; break; } }
+    const dirs = perpDirs(tpl.pts);
+    // per-ride GPS wobble: low-frequency lateral drift + white noise, ~a few meters
+    const f1 = 2 + rnd() * 6, p1 = rnd() * 7, drift = 2 + rnd() * 5;
+    const xy = simplifyDP(tpl.pts.map(([x, y], i) => {
+      const t = i / tpl.pts.length;
+      const off = drift * Math.sin(f1 * Math.PI * t + p1) + (rnd() - 0.5) * 6;
+      return [x + dirs[i][0] * off, y + dirs[i][1] * off];
+    }), 15); // rides arrive as DP-15 m polylines in index.json — match that fidelity
+    let km = 0;
+    for (let i = 1; i < xy.length; i++) km += Math.hypot(xy[i][0] - xy[i - 1][0], xy[i][1] - xy[i - 1][1]);
+    km /= 1000;
+    const day = new Date(2024, 0, 1 + Math.floor(rnd() * 900));
+    rides.push({
+      id: 'r' + r,
+      name: `${day.toISOString().slice(0, 10)} · ${tpl.name}`,
+      km, xy, coords: xy.map(toLL),
+    });
+  }
+}
+
+// ---------- geojson builders ----------
+function ridesFC() {
+  return { type: 'FeatureCollection', features: rides.map(r => ({
+    type: 'Feature',
+    properties: { id: r.id, name: r.name, km: +r.km.toFixed(1) },
+    geometry: { type: 'LineString', coordinates: r.coords },
+  })) };
+}
+
+let pointCount = 0;
+function pointsFC(step) {
+  const feats = [];
+  for (const r of rides) for (const p of resample(r.xy, step))
+    feats.push({ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: toLL(p) } });
+  pointCount = feats.length;
+  return { type: 'FeatureCollection', features: feats };
+}
+
+let edgeCount = 0, edgeMax = 1;
+function edgesFC(cell, log) {
+  // Count rides per CELL (stable under GPS jitter), draw each unique cell-to-cell edge
+  // colored by its endpoints' counts. Edge-level counting fragments: jittered rides take
+  // slightly different transition paths, so overlap never accumulates.
+  const cellCounts = new Map(); // "x,y" -> rides through this cell
+  const edges = new Map();      // "a|b" -> [a, b]
+  for (const r of rides) {
+    const seen = new Set();
+    let prev = null;
+    for (const p of resample(r.xy, cell)) {
+      const c = Math.round(p[0] / cell) + ',' + Math.round(p[1] / cell);
+      if (!seen.has(c)) { seen.add(c); cellCounts.set(c, (cellCounts.get(c) || 0) + 1); }
+      if (prev && c !== prev) {
+        const key = prev < c ? prev + '|' + c : c + '|' + prev;
+        if (!edges.has(key)) edges.set(key, [prev, c]);
+      }
+      prev = c;
+    }
+  }
+  edgeMax = 1;
+  for (const n of cellCounts.values()) if (n > edgeMax) edgeMax = n;
+  const norm = n => log ? Math.log1p(n) / Math.log1p(edgeMax) : n / edgeMax;
+  const feats = [];
+  for (const [a, b] of edges.values()) {
+    const n = Math.min(cellCounts.get(a), cellCounts.get(b));
+    const [ax, ay] = a.split(',').map(Number), [bx, by] = b.split(',').map(Number);
+    feats.push({ type: 'Feature', properties: { n, v: +norm(n).toFixed(3) },
+      geometry: { type: 'LineString', coordinates: [toLL([ax * cell, ay * cell]), toLL([bx * cell, by * cell])] } });
+  }
+  edgeCount = feats.length;
+  return { type: 'FeatureCollection', features: feats };
+}
+
+// ---------- map ----------
+const map = new maplibregl.Map({ container: 'map', style: STYLES.dark, attributionControl: { compact: true } });
+map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
+
+let genMs = 0, dataReady = false;
+function regen() {
+  const t0 = performance.now();
+  genRides(cfg.rides);
+  genMs = Math.round(performance.now() - t0);
+  if (map.getSource('rides')) {
+    map.getSource('rides').setData(ridesFC());
+    map.getSource('heatpts').setData(pointsFC(cfg.bstep));
+    map.getSource('edges').setData(edgesFC(cfg.ccell, cfg.clog));
+  }
+  updateState();
+}
+
+function rampExpr(kind, ramp) {
+  const r = RAMPS[ramp];
+  if (kind === 'heat') {
+    const e = ['interpolate', ['linear'], ['heatmap-density'], 0, 'rgba(0,0,0,0)'];
+    for (const [t, c] of r.stops) e.push(t, c);
+    return e;
+  }
+  const e = ['interpolate', ['linear'], ['get', 'v'], 0, r.line0];
+  for (const [t, c] of r.stops) e.push(t, c);
+  return e;
+}
+
+let bounds = null, didFit = false;
+function addLayers() {
+  if (map.getSource('rides')) return; // idempotent: style.load handler + boot poll may race
+  map.addSource('rides',   { type: 'geojson', data: ridesFC() });
+  map.addSource('heatpts', { type: 'geojson', data: pointsFC(cfg.bstep) });
+  map.addSource('edges',   { type: 'geojson', data: edgesFC(cfg.ccell, cfg.clog) });
+
+  // A — one semi-transparent layer; overlapping features alpha-stack into heat
+  map.addLayer({ id: 'a-glow', type: 'line', source: 'rides',
+    layout: { 'line-cap': 'round', 'line-join': 'round' },
+    paint: { 'line-color': cfg.acolor, 'line-width': cfg.awidth * 3.5, 'line-opacity': cfg.aop * 0.45, 'line-blur': 3 } });
+  map.addLayer({ id: 'a-core', type: 'line', source: 'rides',
+    layout: { 'line-cap': 'round', 'line-join': 'round' },
+    paint: { 'line-color': cfg.acolor, 'line-width': cfg.awidth, 'line-opacity': cfg.aop } });
+
+  // B — density heatmap over resampled points
+  map.addLayer({ id: 'b-heat', type: 'heatmap', source: 'heatpts',
+    paint: { 'heatmap-radius': cfg.brad, 'heatmap-intensity': cfg.bint,
+             'heatmap-weight': 1, 'heatmap-color': rampExpr('heat', cfg.bramp) } });
+
+  // C — pre-binned edges colored by ride count
+  map.addLayer({ id: 'c-edges', type: 'line', source: 'edges',
+    layout: { 'line-cap': 'round', 'line-join': 'round' },
+    paint: { 'line-color': rampExpr('line', cfg.cramp), 'line-width': cfg.cwidth } });
+
+  // shared hover: invisible fat hit layer + highlight — works over any variant
+  map.addLayer({ id: 'hit', type: 'line', source: 'rides',
+    paint: { 'line-color': '#000', 'line-width': 14, 'line-opacity': 0.01 } });
+  map.addLayer({ id: 'highlight', type: 'line', source: 'rides',
+    filter: ['==', ['get', 'id'], ''],
+    layout: { 'line-cap': 'round', 'line-join': 'round' },
+    paint: { 'line-color': '#ffffff', 'line-width': 3, 'line-opacity': 0.9 } });
+
+  applyVariant();
+  map.resize();
+  if (bounds && !didFit) { didFit = true; map.fitBounds(bounds, { padding: 60, duration: 0 }); }
+}
+
+function applyVariant() {
+  const vis = { 'a-glow': variant === 'A' && cfg.aglow, 'a-core': variant === 'A',
+                'b-heat': variant === 'B', 'c-edges': variant === 'C' };
+  for (const [id, on] of Object.entries(vis))
+    if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
+  document.querySelectorAll('.var-A, .var-B, .var-C').forEach(el =>
+    el.style.display = el.classList.contains('var-' + variant) ? '' : 'none');
+  document.getElementById('vname').textContent = `${variant} — ${VARIANTS[variant]}`;
+  updateState();
+}
+
+map.on('style.load', () => { if (dataReady) addLayers(); });
+
+// ---------- hover ----------
+const tooltip = document.getElementById('tooltip');
+let hoverId = null;
+map.on('mousemove', e => {
+  if (!cfg.hover || !map.getLayer('hit')) return;
+  const f = map.queryRenderedFeatures(e.point, { layers: ['hit'] })[0];
+  const id = f ? f.properties.id : '';
+  if (id !== hoverId) {
+    hoverId = id;
+    map.setFilter('highlight', ['==', ['get', 'id'], id]);
+    map.getCanvas().style.cursor = id ? 'pointer' : '';
+  }
+  if (f) {
+    tooltip.style.display = 'block';
+    tooltip.style.left = e.point.x + 14 + 'px';
+    tooltip.style.top = e.point.y + 14 + 'px';
+    tooltip.textContent = `${f.properties.name} · ${f.properties.km} km`;
+  } else tooltip.style.display = 'none';
+});
+
+// ---------- fps ----------
+let fps = 0, frames = 0, tLast = performance.now();
+(function loop(t) {
+  frames++;
+  if (t - tLast >= 500) { fps = Math.round(frames * 1000 / (t - tLast)); frames = 0; tLast = t; updateState(); }
+  requestAnimationFrame(loop);
+})(performance.now());
+
+function updateState() {
+  const lines = [
+    `variant <b>${variant}</b>`,
+    `rides <b>${rides.length}</b> · gen <b>${genMs} ms</b>`,
+  ];
+  if (variant === 'B') lines.push(`heat points <b>${pointCount.toLocaleString()}</b>`);
+  if (variant === 'C') lines.push(`edges <b>${edgeCount.toLocaleString()}</b> · max count <b>${edgeMax}</b>`);
+  lines.push(`fps <b>${fps}</b>`);
+  document.getElementById('state-body').innerHTML = lines.join('<br>');
+}
+
+// ---------- controls ----------
+function bindRange(id, fmt, onchange) {
+  const el = document.getElementById(id), out = document.getElementById('v-' + id);
+  const show = () => out.textContent = fmt(+el.value);
+  el.addEventListener('input', () => { show(); onchange(+el.value); });
+  show();
+}
+bindRange('rides', v => String(RIDE_STEPS[v]), v => { cfg.rides = RIDE_STEPS[v]; regen(); });
+bindRange('aop', v => v.toFixed(2), v => { cfg.aop = v; paintA(); });
+bindRange('awidth', v => v.toFixed(1), v => { cfg.awidth = v; paintA(); });
+bindRange('brad', v => v + 'px', v => { cfg.brad = v; map.setPaintProperty('b-heat', 'heatmap-radius', v); });
+bindRange('bint', v => v.toFixed(2), v => { cfg.bint = v; map.setPaintProperty('b-heat', 'heatmap-intensity', v); });
+bindRange('bstep', v => v + ' m', v => { cfg.bstep = v; map.getSource('heatpts').setData(pointsFC(v)); updateState(); });
+bindRange('ccell', v => v + ' m', v => { cfg.ccell = v; map.getSource('edges').setData(edgesFC(v, cfg.clog)); updateState(); });
+bindRange('cwidth', v => v.toFixed(1), v => { cfg.cwidth = v; map.setPaintProperty('c-edges', 'line-width', v); });
+document.getElementById('hover').addEventListener('change', e => {
+  cfg.hover = e.target.checked;
+  if (!cfg.hover) { map.setFilter('highlight', ['==', ['get', 'id'], '']); tooltip.style.display = 'none'; }
+});
+document.getElementById('aglow').addEventListener('change', e => { cfg.aglow = e.target.checked; applyVariant(); });
+document.getElementById('clog').addEventListener('change', e => {
+  cfg.clog = e.target.checked; map.getSource('edges').setData(edgesFC(cfg.ccell, cfg.clog));
+});
+function paintA() {
+  map.setPaintProperty('a-core', 'line-opacity', cfg.aop);
+  map.setPaintProperty('a-core', 'line-width', cfg.awidth);
+  map.setPaintProperty('a-glow', 'line-opacity', cfg.aop * 0.45);
+  map.setPaintProperty('a-glow', 'line-width', cfg.awidth * 3.5);
+}
+
+const acolors = document.getElementById('acolors');
+for (const c of A_COLORS) {
+  const b = document.createElement('button');
+  b.style.background = c; b.style.width = '26px'; b.style.height = '22px';
+  if (c === cfg.acolor) b.classList.add('active');
+  b.addEventListener('click', () => {
+    cfg.acolor = c;
+    map.setPaintProperty('a-core', 'line-color', c);
+    map.setPaintProperty('a-glow', 'line-color', c);
+    acolors.querySelectorAll('button').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+  });
+  acolors.appendChild(b);
+}
+
+for (const holder of document.querySelectorAll('.ramp-buttons')) {
+  const which = holder.dataset.for;
+  for (const name of Object.keys(RAMPS)) {
+    const b = document.createElement('button');
+    b.textContent = name;
+    if ((which === 'B' ? cfg.bramp : cfg.cramp) === name) b.classList.add('active');
+    b.addEventListener('click', () => {
+      if (which === 'B') { cfg.bramp = name; map.setPaintProperty('b-heat', 'heatmap-color', rampExpr('heat', name)); }
+      else { cfg.cramp = name; map.setPaintProperty('c-edges', 'line-color', rampExpr('line', name)); }
+      holder.querySelectorAll('button').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+    });
+    holder.appendChild(b);
+  }
+}
+
+document.querySelectorAll('#basemaps button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('#basemaps button').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+  // diff:false forces a full style load — diff mode strips our layers without firing style.load
+  map.setStyle(STYLES[b.dataset.style], { diff: false });
+}));
+
+// ---------- variant switcher (floating bar) ----------
+function setVariant(v) {
+  variant = v;
+  const url = new URL(location);
+  url.searchParams.set('variant', v);
+  history.replaceState(null, '', url);
+  applyVariant();
+}
+const cycle = d => setVariant(ORDER[(ORDER.indexOf(variant) + d + ORDER.length) % ORDER.length]);
+document.getElementById('prev').addEventListener('click', () => cycle(-1));
+document.getElementById('next').addEventListener('click', () => cycle(1));
+document.addEventListener('keydown', e => {
+  if (/^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
+  if (e.key === 'ArrowLeft') cycle(-1);
+  if (e.key === 'ArrowRight') cycle(1);
+});
+
+// ---------- boot ----------
+(async () => {
+  const txt = await (await fetch('/airport.gpx')).text();
+  const ll = parseGPX(txt);
+  lon0 = ll[0][0]; lat0 = ll[0][1];
+  mLon = 111320 * Math.cos(lat0 * Math.PI / 180);
+  const base = simplifyDP(ll.map(toXY), 15); // match index.json's DP-15 m fidelity
+  buildTemplates(base);
+  regen();
+
+  let minX = 1e12, minY = 1e12, maxX = -1e12, maxY = -1e12;
+  for (const t of templates) for (const [x, y] of t.pts) {
+    minX = Math.min(minX, x); minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
+  }
+  bounds = [toLL([minX, minY]), toLL([maxX, maxY])];
+  dataReady = true;
+
+  // isStyleLoaded() can lag behind the style.load event, so poll until layers can be added
+  (function poll() {
+    if (map.getSource('rides')) return;
+    if (map.isStyleLoaded()) addLayers();
+    else setTimeout(poll, 100);
+  })();
+  const hideLoading = () => document.getElementById('loading')?.remove();
+  map.once('idle', hideLoading);
+  setTimeout(hideLoading, 8000);
+})();
+</script>
+</body>
+</html>

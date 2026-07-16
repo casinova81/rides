@@ -1,0 +1,597 @@
+<!doctype html>
+<!-- PROTOTYPE — THROWAWAY. Wayfinder ticket 13 (ride comparison UI).
+     Three structurally different answers to "how are two rides picked, and what does the
+     side-by-side view show?", switchable via ?variant= (A/B/C), the floating bar, or ←/→.
+       A — Side-by-side: entry from the ride detail page ("Compare with…"), two full columns.
+       B — Overlay: dedicated compare page, both tracks on one map, overlaid charts, diff table, ghost race.
+       C — Scoreboard: entry from the library (compare mode on cards), pure diff view, no MapLibre.
+     Data: airport.gpx (real) + two synthetic rides derived from it — a same-route slower copy
+     and a different-route transform — so same-route vs any-two comparison can both be felt. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PROTOTYPE: ride comparison</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.css">
+<script src="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-1: #fcfcfb; --page: #f9f9f7;
+    --ink-1: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+    --grid: #e1e0d9; --baseline: #c3c2b7; --ring: rgba(11,11,11,.10);
+    --r1: #2a78d6;   /* ride 1 (blue) */
+    --r2: #e8590c;   /* ride 2 (orange) */
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; background: var(--page); color: var(--ink-1);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  h1 { font-size: 22px; margin: 0; font-weight: 650; }
+  .sub { color: var(--ink-2); font-size: 13px; }
+  .hint { color: var(--muted); font-size: 12px; }
+  .card { background: var(--surface-1); border: 1px solid var(--ring); border-radius: 12px; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+
+  select { font: inherit; font-size: 13px; padding: 5px 8px; border: 1px solid var(--baseline);
+    border-radius: 8px; background: var(--surface-1); color: var(--ink-1); max-width: 100%; }
+
+  .tiles { display: grid; gap: 8px; grid-template-columns: 1fr 1fr; }
+  .tile { padding: 10px 12px; }
+  .tile .v { font-size: 18px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .tile .l { color: var(--muted); font-size: 11px; margin-top: 2px; }
+
+  .chart { position: relative; }
+  .chart header { display: flex; justify-content: space-between; align-items: baseline; padding: 8px 12px 0; }
+  .chart header .t { font-size: 12px; color: var(--ink-2); font-weight: 600; }
+  .chart header .cur { font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .chart svg { display: block; width: 100%; touch-action: none; }
+  .tip { position: absolute; pointer-events: none; background: var(--ink-1); color: #fff; font-size: 11px;
+         padding: 4px 7px; border-radius: 6px; white-space: nowrap; transform: translate(-50%, -130%); display: none; z-index: 5;
+         font-variant-numeric: tabular-nums; }
+  .tip b { font-weight: 400; }
+
+  /* diff table (variant B) */
+  table.vs { border-collapse: collapse; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }
+  table.vs th { color: var(--muted); font-weight: 500; padding: 6px 10px; border-bottom: 1px solid var(--grid); text-align: right; }
+  table.vs td { padding: 5px 10px; border-bottom: 1px solid var(--grid); text-align: right; }
+  table.vs th:first-child, table.vs td:first-child { text-align: left; color: var(--ink-2); }
+
+  /* library cards (variant C) */
+  .cardgrid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+  .ridecard { padding: 12px; cursor: pointer; position: relative; border-width: 2px; border-color: var(--ring); }
+  .ridecard:hover { border-color: var(--baseline); }
+  .ridecard.sel1 { border-color: var(--r1); } .ridecard.sel2 { border-color: var(--r2); }
+  .ridecard .badge { position: absolute; top: 8px; right: 8px; width: 22px; height: 22px; border-radius: 50%;
+    color: #fff; font-size: 12px; font-weight: 650; display: flex; align-items: center; justify-content: center; }
+  .ridecard .nm { font-size: 13px; font-weight: 600; margin-top: 8px; }
+  .ridecard .meta { font-size: 11px; color: var(--muted); margin-top: 2px; font-variant-numeric: tabular-nums; }
+
+  /* scoreboard (variant C) */
+  .score { display: grid; grid-template-columns: minmax(70px,auto) 1fr 1fr minmax(70px,auto); gap: 4px 10px;
+    align-items: center; font-size: 13px; font-variant-numeric: tabular-nums; }
+  .score .lbl { grid-column: 1 / -1; color: var(--muted); font-size: 11px; margin-top: 10px; }
+  .score .va { text-align: right; } .score .vb { text-align: left; }
+  .score .bl, .score .br { height: 9px; border-radius: 5px; min-width: 2px; }
+  .score .bl { justify-self: end; background: var(--r1); border-radius: 5px 2px 2px 5px; }
+  .score .br { justify-self: start; background: var(--r2); border-radius: 2px 5px 5px 2px; }
+
+  table.splitdiff { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; }
+  table.splitdiff th { color: var(--muted); font-weight: 500; text-align: right; padding: 4px 8px; border-bottom: 1px solid var(--grid); }
+  table.splitdiff td { text-align: right; padding: 3px 8px; border-bottom: 1px solid var(--grid); }
+  table.splitdiff th:first-child, table.splitdiff td:first-child { text-align: left; }
+
+  .pcontrols { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .pcontrols button { background: var(--surface-1); border: 1px solid var(--baseline); color: var(--ink-1);
+    border-radius: 8px; padding: 5px 11px; font-size: 13px; cursor: pointer; }
+  .pcontrols button.on { background: var(--ink-1); color: #fff; border-color: var(--ink-1); }
+  .pcontrols .gap { font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; align-items: center; }
+
+  /* ---- switcher (prototype chrome, not part of the design) ---- */
+  #switcher { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 999;
+    background: #14161a; color: #fff; border-radius: 999px; display: flex; gap: 4px; align-items: center;
+    padding: 6px 10px; font-size: 13px; box-shadow: 0 4px 18px rgba(0,0,0,.35); }
+  #switcher button { background: none; border: none; color: #9fd0ff; font-size: 16px; cursor: pointer; padding: 2px 8px; }
+  #switcher .lbl { min-width: 230px; text-align: center; }
+  #switcher .proto { color: #ff8a80; font-size: 10px; letter-spacing: .5px; margin-right: 4px; }
+
+  .maplibregl-map { font: inherit; }
+  @media (max-width: 880px) { .cols2 { grid-template-columns: 1fr !important; } }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="switcher">
+  <span class="proto">PROTOTYPE</span>
+  <button id="prev" title="previous variant (←)">←</button>
+  <span class="lbl" id="vlabel"></span>
+  <button id="next" title="next variant (→)">→</button>
+</div>
+
+<script>
+"use strict";
+/* ================= stats contract (ticket 03) — derive a ride from raw trackpoints ================= */
+const R = 6371000, D2R = Math.PI / 180;
+const hav = (a, b) => {
+  const dLat = (b.lat-a.lat)*D2R, dLon = (b.lon-a.lon)*D2R;
+  const s = Math.sin(dLat/2)**2 + Math.cos(a.lat*D2R)*Math.cos(b.lat*D2R)*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(s));
+};
+const roll5 = arr => arr.map((_, i) => {
+  const a = Math.max(0, i-2), b = Math.min(arr.length-1, i+2);
+  let s = 0; for (let j = a; j <= b; j++) s += arr[j];
+  return s/(b-a+1);
+});
+
+function deriveRide(raw, name, sport) {
+  const n = raw.length, t0 = raw[0].time;
+  const t = raw.map(p => Math.round(p.time - t0));
+  const dist = [0]; for (let i = 1; i < n; i++) dist.push(dist[i-1] + hav(raw[i-1], raw[i]));
+  // speed from UNROUNDED timestamps — synthetic time-scaling can round two points onto the same second
+  const vRaw = raw.map((_, i) => i === 0 ? 0 : (dist[i]-dist[i-1]) / Math.max(0.25, raw[i].time - raw[i-1].time));
+  vRaw[0] = vRaw[1] ?? 0;
+  const speed = roll5(vRaw);
+  const ele = roll5(raw.map(p => p.ele));
+  let gain = 0, loss = 0, anchor = ele[0];
+  for (const e of ele) {
+    const d = e - anchor;
+    if (d >= 2) { gain += d; anchor = e; } else if (d <= -2) { loss += d * -1, anchor = e; }
+  }
+  const MOV = 2/3.6; let movingTime = 0;
+  for (let i = 1; i < n; i++) if (speed[i] >= MOV) movingTime += t[i]-t[i-1];
+  const splits = []; let s0 = 0;
+  for (let i = 1; i < n; i++) {
+    const kmDone = Math.floor(dist[i]/1000), kmPrev = Math.floor(dist[s0]/1000);
+    if (kmDone > kmPrev || i === n-1) {
+      const len = dist[i]-dist[s0], time = t[i]-t[s0];
+      if (len > 50) splits.push({ km: splits.length+1, len, time, avgSpeed: len/time });
+      s0 = i;
+    }
+  }
+  const best = W => {
+    if (dist[n-1] < W) return null;
+    let bestT = Infinity, k = 0;
+    for (let j = 0; j < n; j++) {
+      while (k < n-1 && dist[k] < dist[j]+W) k++;
+      if (dist[k] < dist[j]+W) break;
+      if (t[k]-t[j] < bestT) bestT = t[k]-t[j];
+    }
+    return { time: bestT };
+  };
+  return {
+    name, sport, start: new Date(t0*1000),
+    stats: { distance: dist[n-1], duration: t[n-1], movingTime,
+      avgMovingSpeed: dist[n-1]/movingTime, maxSpeed: Math.max(...speed),
+      elevationGain: gain, elevationLoss: loss },
+    splits, bests: { '5k': best(5000), '10k': best(10000), '20k': best(20000) },
+    track: { lat: raw.map(p=>p.lat), lon: raw.map(p=>p.lon), ele, t, dist, speed },
+  };
+}
+
+/* ================= synthetic rides (ticket 13: offset/scaled copies of airport.gpx) ================= */
+// same route, ridden ~12 % slower on another day (windy) — for same-route comparison
+function synthSameRoute(raw) {
+  const out = []; let tt = raw[0].time - 18*86400;
+  for (let i = 0; i < raw.length; i++) {
+    const dt = i ? raw[i].time - raw[i-1].time : 0;
+    tt += dt * (1.13 + 0.22*Math.sin(i/260));
+    out.push({ lat: raw[i].lat + 0.00028, lon: raw[i].lon - 0.00035, ele: raw[i].ele*1.03 + 1.5, time: tt });
+  }
+  return out;
+}
+// a genuinely different, shorter, hillier ride — for the any-two-rides scope check
+function synthOtherRoute(raw) {
+  const m = Math.floor(raw.length*0.62);
+  let la0 = 0, lo0 = 0; for (let i = 0; i < m; i++) { la0 += raw[i].lat; lo0 += raw[i].lon; }
+  la0 /= m; lo0 /= m;
+  const c = Math.cos(la0*D2R), rot = 40*D2R, s = 0.55;
+  const eleMin = Math.min(...raw.map(p => p.ele));
+  const out = []; let tt = raw[0].time - 45*86400;
+  for (let i = 0; i < m; i++) {
+    const dx = (raw[i].lon-lo0)*c, dy = raw[i].lat-la0;
+    const rx = dx*Math.cos(rot) - dy*Math.sin(rot), ry = dx*Math.sin(rot) + dy*Math.cos(rot);
+    const dt = i ? raw[i].time - raw[i-1].time : 0;
+    tt += dt * 0.62;
+    out.push({ lat: la0 + ry*s - 0.012, lon: lo0 + rx*s/c + 0.018,
+      ele: eleMin + (raw[i].ele-eleMin)*2.2 + 14*Math.sin(i/150) + 14, time: tt });
+  }
+  return out;
+}
+
+/* ================= formatting: SI stored, de-DE numbers, English labels ================= */
+const nf = d => new Intl.NumberFormat('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d });
+const fmtKm = m => nf(1).format(m/1000) + ' km';
+const fmtKmh = ms => nf(1).format(ms*3.6) + ' km/h';
+const fmtM = m => nf(0).format(m) + ' m';
+const fmtDur = s => {
+  const h = Math.floor(s/3600), m = Math.floor(s/60)%60, sec = Math.floor(s)%60;
+  return h > 0 ? `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}` : `${m}:${String(sec).padStart(2,'0')}`;
+};
+const fmtDate = d => new Intl.DateTimeFormat('de-DE', { timeZone: 'Europe/Berlin', day:'2-digit', month:'2-digit', year:'numeric' }).format(d);
+const sgn = v => v > 0 ? '+' : v < 0 ? '−' : '±';
+const dDur = v => `${sgn(v)}${fmtDur(Math.abs(v))}`;
+const dKm = v => `${sgn(v)}${nf(1).format(Math.abs(v)/1000)} km`;
+const dKmh = v => `${sgn(v)}${nf(1).format(Math.abs(v)*3.6)} km/h`;
+const dM = v => `${sgn(v)}${nf(0).format(Math.abs(v))} m`;
+
+/* ================= shared: distance-keyed sync, charts, maps, thumbnails ================= */
+let rides = [];                                   // [real, same-route synth, other-route synth]
+const state = { aOther: 1, b1: 0, b2: 1, cSel: [0, 1] };  // picker state survives variant switches
+const COLORS = ['var(--r1)', 'var(--r2)'], HEX = ['#2a78d6', '#e8590c'];
+
+const sync = { listeners: [], goTo(d, src) { for (const l of this.listeners) if (l.src !== src) l.set(d); },
+               clear(src) { for (const l of this.listeners) if (l.src !== src) l.hide?.(); } };
+const idxAtDist = (track, d) => { let lo = 0, hi = track.dist.length-1;
+  while (lo < hi) { const mid = (lo+hi)>>1; track.dist[mid] < d ? lo = mid+1 : hi = mid; } return lo; };
+const idxAtTime = (track, tm) => { let lo = 0, hi = track.t.length-1;
+  while (lo < hi) { const mid = (lo+hi)>>1; track.t[mid] < tm ? lo = mid+1 : hi = mid; } return lo; };
+
+// series: [{ track, ys, color }] — one or two, drawn over a shared 0..xMax distance axis
+function makeChart(host, { title, series, yFmt, area, xMax }) {
+  const wrap = document.createElement('div'); wrap.className = 'chart';
+  wrap.innerHTML = `<header><span class="t">${title}</span><span class="cur"></span></header>`;
+  const H = 150, ml = 62, mr = 10, mt = 6, mb = 18;
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('height', H); wrap.appendChild(svg);
+  const tip = document.createElement('div'); tip.className = 'tip'; wrap.appendChild(tip);
+  host.appendChild(wrap);
+  const cur = wrap.querySelector('.cur');
+  let W, X, Y, lo, hi;
+  function render() {
+    W = wrap.clientWidth || 600;
+    svg.setAttribute('width', W); svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    lo = Infinity; hi = -Infinity;
+    for (const s of series) { lo = Math.min(lo, ...s.ys); hi = Math.max(hi, ...s.ys); }
+    const pad = (hi-lo)*0.08 || 1; lo -= pad; hi += pad;
+    X = d => ml + (d/xMax) * (W-ml-mr);
+    Y = v => mt + (1-(v-lo)/(hi-lo)) * (H-mt-mb);
+    let g = '';
+    for (let i = 0; i <= 3; i++) {
+      const v = lo + (hi-lo)*i/3, y = Y(v);
+      g += `<line x1="${ml}" x2="${W-mr}" y1="${y}" y2="${y}" stroke="var(--grid)" stroke-width="1"/>` +
+           `<text x="${ml-6}" y="${y+3}" text-anchor="end" font-size="10" fill="var(--muted)" style="font-variant-numeric:tabular-nums">${yFmt(v)}</text>`;
+    }
+    for (let km = 0; km <= xMax/1000; km += 10)
+      g += `<text x="${X(km*1000)}" y="${H-4}" text-anchor="middle" font-size="10" fill="var(--muted)">${km === 0 ? '0' : km + ' km'}</text>`;
+    series.forEach((s, k) => {
+      const n = s.track.dist.length, step = Math.max(1, Math.floor(n/1200));
+      let dPath = '';
+      for (let i = 0; i < n; i += step) dPath += (i ? 'L' : 'M') + X(s.track.dist[i]).toFixed(1) + ' ' + Y(s.ys[i]).toFixed(1);
+      if (area) g += `<path d="${dPath} L${X(s.track.dist[n-1])} ${Y(lo)} L${ml} ${Y(lo)} Z" fill="${s.color}" fill-opacity="0.10" stroke="none"/>`;
+      g += `<path d="${dPath}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-opacity="${series.length > 1 ? .9 : 1}"/>`;
+    });
+    g += `<line x1="${ml}" x2="${W-mr}" y1="${H-mb}" y2="${H-mb}" stroke="var(--baseline)" stroke-width="1"/>`;
+    g += `<line class="cross" y1="${mt}" y2="${H-mb}" stroke="var(--ink-2)" stroke-width="1" stroke-dasharray="3 3" visibility="hidden"/>`;
+    series.forEach((s, k) =>
+      g += `<circle class="dot dot${k}" r="4.5" fill="${s.color}" stroke="var(--surface-1)" stroke-width="2" visibility="hidden"/>`);
+    svg.innerHTML = g;
+  }
+  render();
+  const api = { src: wrap,
+    set(d) {
+      d = Math.min(d, xMax);
+      const x = X(d);
+      const cross = svg.querySelector('.cross');
+      cross.setAttribute('x1', x); cross.setAttribute('x2', x); cross.setAttribute('visibility', 'visible');
+      const parts = []; let tipY = mt;
+      series.forEach((s, k) => {
+        const dot = svg.querySelector('.dot' + k), end = s.track.dist[s.track.dist.length-1];
+        if (d <= end + 40) {
+          const i = idxAtDist(s.track, d), v = s.ys[i];
+          dot.setAttribute('cx', X(s.track.dist[i])); dot.setAttribute('cy', Y(v)); dot.setAttribute('visibility', 'visible');
+          parts.push(`<b style="color:${series.length > 1 ? s.color : 'inherit'}">${yFmt(v)}</b>`);
+          tipY = Math.max(tipY, Y(v));
+        } else { dot.setAttribute('visibility', 'hidden'); parts.push('—'); }
+      });
+      cur.innerHTML = `${fmtKm(d)} · ` + parts.join(' / ');
+      tip.style.display = 'block'; tip.style.left = x + 'px'; tip.style.top = (tipY + 24) + 'px';
+      tip.innerHTML = parts.map((p, k) => series.length > 1
+        ? `<span style="color:${HEX[k]}">●</span> ${p.replace(/<[^>]+>/g, '')}` : p.replace(/<[^>]+>/g, '')).join(' &nbsp;') +
+        ` @ ${fmtKm(d)}`;
+    },
+    hide() { svg.querySelector('.cross').setAttribute('visibility','hidden');
+             svg.querySelectorAll('.dot').forEach(el => el.setAttribute('visibility','hidden'));
+             tip.style.display = 'none'; cur.textContent = ''; } };
+  svg.addEventListener('pointermove', e => {
+    const r = svg.getBoundingClientRect();
+    const d = Math.max(0, Math.min(1, (e.clientX - r.left - ml) / (W-ml-mr))) * xMax;
+    api.set(d); sync.goTo(d, wrap);
+  });
+  svg.addEventListener('pointerleave', () => { api.hide(); sync.clear(wrap); });
+  new ResizeObserver(render).observe(wrap);
+  sync.listeners.push(api);
+  return api;
+}
+
+// entries: [{ track, color }] — one or two tracks on one map, cursors synced by distance
+const liveMaps = [];
+function makeMap(host, entries) {
+  let b = null;
+  for (const e of entries) e.track.lat.forEach((la, i) => {
+    const ll = [e.track.lon[i], la];
+    b = b ? b.extend(ll) : new maplibregl.LngLatBounds(ll, ll);
+  });
+  const map = new maplibregl.Map({ container: host, style: 'https://tiles.openfreemap.org/styles/liberty',
+    bounds: b, fitBoundsOptions: { padding: 40 }, attributionControl: { compact: true } });
+  const cursors = entries.map((e, k) => {
+    const el = document.createElement('div');
+    el.style.cssText = `width:14px;height:14px;border-radius:50%;background:${HEX[e.ci ?? k]};border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)`;
+    return new maplibregl.Marker({ element: el }).setLngLat([e.track.lon[0], e.track.lat[0]]).addTo(map);
+  });
+  map.on('load', () => {
+    entries.forEach((e, k) => {
+      map.addSource('track' + k, { type: 'geojson', data: { type: 'Feature',
+        geometry: { type: 'LineString', coordinates: e.track.lat.map((la, i) => [e.track.lon[i], la]) } } });
+      map.addLayer({ id: 'track' + k, type: 'line', source: 'track' + k,
+        paint: { 'line-color': HEX[e.ci ?? k], 'line-width': 3.5, 'line-opacity': .8 } });
+    });
+    map.on('mousemove', ev => {   // nearest trackpoint on any shown track → distance-sync everything
+      let bk = 0, bi = 0, bd = Infinity;
+      const cs = Math.cos(entries[0].track.lat[0]*D2R);
+      entries.forEach((e, k) => {
+        for (let i = 0; i < e.track.lat.length; i += 2) {
+          const dx = (ev.lngLat.lng-e.track.lon[i])*cs, dy = ev.lngLat.lat-e.track.lat[i], d = dx*dx+dy*dy;
+          if (d < bd) { bd = d; bk = k; bi = i; }
+        }
+      });
+      const e = entries[bk], p = map.project([e.track.lon[bi], e.track.lat[bi]]);
+      if (Math.hypot(p.x-ev.point.x, p.y-ev.point.y) < 30) sync.goTo(e.track.dist[bi], null);
+    });
+  });
+  new ResizeObserver(() => map.resize()).observe(host);  // pane/layout settles after construction
+  const api = { src: host, map,
+    set(d) { entries.forEach((e, k) => {
+      const i = idxAtDist(e.track, Math.min(d, e.track.dist[e.track.dist.length-1]));
+      cursors[k].setLngLat([e.track.lon[i], e.track.lat[i]]);
+    }); },
+    setIdx(k, i) { cursors[k].setLngLat([entries[k].track.lon[i], entries[k].track.lat[i]]); } };
+  sync.listeners.push(api);
+  liveMaps.push(map);
+  return api;
+}
+
+// bare SVG route thumbnail from the track (library-card convention: no tiles)
+function thumbSVG(track, color, w = 160, h = 96) {
+  const cs = Math.cos(track.lat[0]*D2R);
+  const xs = track.lon.map(lo => lo*cs), ys = track.lat;
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const s = Math.min((w-12)/(x1-x0 || 1e-9), (h-12)/(y1-y0 || 1e-9));
+  const px = x => 6 + (x-x0)*s + ((w-12)-(x1-x0)*s)/2, py = y => h-6 - (y-y0)*s - ((h-12)-(y1-y0)*s)/2;
+  const step = Math.max(1, Math.floor(track.lat.length/300));
+  let d = '';
+  for (let i = 0; i < track.lat.length; i += step) d += (i ? 'L' : 'M') + px(xs[i]).toFixed(1) + ' ' + py(ys[i]).toFixed(1);
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" style="display:block"><path d="${d}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round"/></svg>`;
+}
+
+const rideHead = (r, k) => `<div><span class="dot" style="background:${COLORS[k]}"></span><b style="font-size:14px">${r.name}</b>
+  <div class="sub" style="margin-left:16px">${fmtDate(r.start)} · ${fmtKm(r.stats.distance)}</div></div>`;
+const pickOptions = (exclude) => rides.map((r, i) =>
+  `<option value="${i}" ${exclude.includes(i) ? 'disabled' : ''}>${r.name} — ${fmtDate(r.start)} · ${fmtKm(r.stats.distance)}</option>`).join('');
+
+// [label, accessor, formatter, deltaFormatter] — the comparison stat contract proposal
+const METRICS = [
+  ['Distance', s => s.distance, fmtKm, dKm],
+  ['Moving time', s => s.movingTime, fmtDur, dDur],
+  ['Elapsed time', s => s.duration, fmtDur, dDur],
+  ['Avg speed', s => s.avgMovingSpeed, fmtKmh, dKmh],
+  ['Max speed', s => s.maxSpeed, fmtKmh, dKmh],
+  ['Elevation gain', s => s.elevationGain, v => '↑ ' + fmtM(v), dM],
+  ['Elevation loss', s => s.elevationLoss, v => '↓ ' + fmtM(v), dM],
+];
+const BESTS = [['Fastest 5 km', '5k'], ['Fastest 10 km', '10k'], ['Fastest 20 km', '20k']];
+
+/* ================= the three variants ================= */
+const variants = {
+
+  /* A — entry: "Compare with…" on the ride detail page → two full columns, one per ride */
+  A: { name: 'Side-by-side (from ride page)', render(app) {
+    const rA = rides[0], rB = rides[state.aOther];
+    const xMax = Math.max(rA.stats.distance, rB.stats.distance);
+    app.innerHTML = `<div style="max-width:1240px;margin:0 auto;padding:16px;display:grid;gap:14px">
+      <div>
+        <h1>${rA.name}</h1>
+        <div class="sub" style="margin-top:4px">You are on this ride's detail page ·
+          <b>⇄ Compare with</b> <select id="pickB">${pickOptions([0])}</select></div>
+        <div class="hint" style="margin-top:4px">Entry point: a "Compare" affordance on the ride detail page; the second ride comes from this picker.</div>
+      </div>
+      <div class="cols2" style="display:grid;gap:14px;grid-template-columns:1fr 1fr">
+        ${[rA, rB].map((r, k) => `<div style="display:grid;gap:10px;align-content:start">
+          ${rideHead(r, k)}
+          <div id="map${k}" class="card" style="height:30vh;min-height:220px;overflow:hidden"></div>
+          <div class="tiles">${METRICS.slice(0, 4).map(([l,, fm], mi) =>
+            `<div class="tile card"><div class="v">${[fmtKm(r.stats.distance), fmtDur(r.stats.movingTime), fmtKmh(r.stats.avgMovingSpeed), '↑ ' + fmtM(r.stats.elevationGain)][mi]}</div><div class="l">${['Distance','Moving time','Avg speed','Elevation gain'][mi]}</div></div>`).join('')}</div>
+          <div class="card" id="ele${k}"></div>
+          <div class="card" id="spd${k}"></div>
+        </div>`).join('')}
+      </div>
+      <div class="hint">Charts share one distance axis (0–${nf(1).format(xMax/1000)} km); hovering any chart or map moves the cursor on <em>both</em> rides at the same km.</div>
+    </div>`;
+    app.querySelector('#pickB').value = state.aOther;
+    app.querySelector('#pickB').onchange = e => { state.aOther = +e.target.value; mount('A'); };
+    [rA, rB].forEach((r, k) => {
+      makeChart(app.querySelector('#ele' + k), { title: 'ELEVATION', series: [{ track: r.track, ys: r.track.ele, color: COLORS[k] }], yFmt: fmtM, area: true, xMax });
+      makeChart(app.querySelector('#spd' + k), { title: 'SPEED', series: [{ track: r.track, ys: r.track.speed, color: COLORS[k] }], yFmt: fmtKmh, area: false, xMax });
+      makeMap(app.querySelector('#map' + k), [{ track: r.track, ci: k }]);
+    });
+  } },
+
+  /* B — entry: dedicated /compare page → both rides overlaid on one map + shared charts + Δ table */
+  B: { name: 'Overlay (compare page)', render(app) {
+    if (state.b1 === state.b2) state.b2 = (state.b1 + 1) % rides.length;
+    const r1 = rides[state.b1], r2 = rides[state.b2];
+    const xMax = Math.max(r1.stats.distance, r2.stats.distance);
+    app.innerHTML = `<div style="max-width:1000px;margin:0 auto;padding:16px;display:grid;gap:14px">
+      <div>
+        <h1>Compare rides</h1>
+        <div class="hint" style="margin-top:4px">Entry point: a dedicated compare page; both rides picked here. Try the different-route ride to feel where the overlay breaks down.</div>
+      </div>
+      <div class="legend">
+        <span><span class="dot" style="background:var(--r1)"></span><select id="p1">${pickOptions([])}</select></span>
+        <span style="color:var(--muted)">vs</span>
+        <span><span class="dot" style="background:var(--r2)"></span><select id="p2">${pickOptions([])}</select></span>
+      </div>
+      <div id="map" class="card" style="height:44vh;min-height:300px;overflow:hidden"></div>
+      <div id="race" class="card" style="padding:8px 12px"></div>
+      <div class="card" id="c1"></div><div class="card" id="c2"></div>
+      <div class="card" style="padding:4px 6px"><table class="vs">
+        <tr><th></th><th><span class="dot" style="background:var(--r1)"></span>${r1.name}</th>
+            <th><span class="dot" style="background:var(--r2)"></span>${r2.name}</th><th>Δ (2−1)</th></tr>
+        ${METRICS.map(([l, get, fm, dfm]) =>
+          `<tr><td>${l}</td><td>${fm(get(r1.stats))}</td><td>${fm(get(r2.stats))}</td><td>${dfm(get(r2.stats)-get(r1.stats))}</td></tr>`).join('')}
+        ${BESTS.map(([l, key]) => {
+          const a = r1.bests[key], b = r2.bests[key];
+          return `<tr><td>${l}</td><td>${a ? fmtDur(a.time) : '—'}</td><td>${b ? fmtDur(b.time) : '—'}</td>
+            <td>${a && b ? dDur(b.time-a.time) : '—'}</td></tr>`; }).join('')}
+      </table></div>
+    </div>`;
+    const p1 = app.querySelector('#p1'), p2 = app.querySelector('#p2');
+    p1.value = state.b1; p2.value = state.b2;
+    p1.onchange = e => { state.b1 = +e.target.value; mount('B'); };
+    p2.onchange = e => { state.b2 = +e.target.value; mount('B'); };
+    makeChart(app.querySelector('#c1'), { title: 'ELEVATION', yFmt: fmtM, area: true, xMax,
+      series: [{ track: r1.track, ys: r1.track.ele, color: COLORS[0] }, { track: r2.track, ys: r2.track.ele, color: COLORS[1] }] });
+    makeChart(app.querySelector('#c2'), { title: 'SPEED', yFmt: fmtKmh, area: false, xMax,
+      series: [{ track: r1.track, ys: r1.track.speed, color: COLORS[0] }, { track: r2.track, ys: r2.track.speed, color: COLORS[1] }] });
+    const mapApi = makeMap(app.querySelector('#map'), [{ track: r1.track }, { track: r2.track }]);
+
+    // ghost race: both rides replay on a shared ride-time clock; readout shows who leads by how much
+    const race = app.querySelector('#race');
+    race.classList.add('pcontrols');
+    race.innerHTML = `<button class="pp">▶</button><span class="hint">Ghost race</span>
+      <button data-s="50">50×</button><button data-s="200" class="on">200×</button><button data-s="500">500×</button>
+      <span class="gap" style="margin-left:auto"></span>`;
+    const pp = race.querySelector('.pp'), gap = race.querySelector('.gap');
+    const durMax = Math.max(r1.stats.duration, r2.stats.duration);
+    let playing = false, speed = 200, vt = 0, raf = 0, last = null;
+    function loop(ts) {
+      const dt = last === null ? 0 : Math.min(.1, (ts-last)/1000); last = ts;
+      vt += dt*speed;
+      if (vt >= durMax) { vt = durMax; playing = false; pp.textContent = '▶'; }
+      const i1 = idxAtTime(r1.track, Math.min(vt, r1.stats.duration));
+      const i2 = idxAtTime(r2.track, Math.min(vt, r2.stats.duration));
+      mapApi.setIdx(0, i1); mapApi.setIdx(1, i2);
+      const lead = r1.track.dist[i1] - r2.track.dist[i2];
+      const leader = lead >= 0 ? r1 : r2;
+      gap.innerHTML = `${fmtDur(vt)} — <b style="color:${lead >= 0 ? HEX[0] : HEX[1]}">${leader.name}</b> ahead by ${fmtKm(Math.abs(lead))}`;
+      if (playing) raf = requestAnimationFrame(loop);   // rAF only while playing — an idle page must settle
+    }
+    pp.onclick = () => {
+      if (!playing && vt >= durMax) vt = 0;
+      playing = !playing; pp.textContent = playing ? '⏸' : '▶';
+      last = null;
+      if (playing) raf = requestAnimationFrame(loop); else cancelAnimationFrame(raf);
+    };
+    race.querySelectorAll('[data-s]').forEach(bn => bn.onclick = () => { speed = +bn.dataset.s;
+      race.querySelectorAll('[data-s]').forEach(x => x.classList.toggle('on', x === bn)); });
+    return { stop: () => cancelAnimationFrame(raf) };
+  } },
+
+  /* C — entry: compare mode in the library → pure numeric scoreboard, no MapLibre at all */
+  C: { name: 'Scoreboard (pick in library)', render(app) {
+    const [i1, i2] = state.cSel;
+    const r1 = i1 != null ? rides[i1] : null, r2 = i2 != null ? rides[i2] : null;
+    app.innerHTML = `<div style="max-width:1000px;margin:0 auto;padding:16px;display:grid;gap:14px">
+      <div>
+        <h1>Library — compare mode</h1>
+        <div class="hint" style="margin-top:4px">Entry point: a "Compare" toggle on the library page; click two cards. The view is a diff scoreboard — thumbnails and numbers only, no live map.</div>
+      </div>
+      <div class="cardgrid">${rides.map((r, i) => {
+        const sel = state.cSel.indexOf(i);
+        return `<div class="ridecard card ${sel === 0 ? 'sel1' : sel === 1 ? 'sel2' : ''}" data-i="${i}">
+          ${sel >= 0 ? `<div class="badge" style="background:${COLORS[sel]}">${sel+1}</div>` : ''}
+          ${thumbSVG(r.track, 'var(--ink-2)')}
+          <div class="nm">${r.name}</div>
+          <div class="meta">${fmtDate(r.start)} · ${fmtKm(r.stats.distance)} · ↑ ${fmtM(r.stats.elevationGain)} · ${fmtKmh(r.stats.avgMovingSpeed)}</div>
+        </div>`; }).join('')}</div>
+      ${r1 && r2 ? `
+      <div class="cols2" style="display:grid;gap:14px;grid-template-columns:1fr 1fr">
+        <div class="card" style="padding:12px">${thumbSVG(r1.track, 'var(--r1)')}${rideHead(r1, 0)}</div>
+        <div class="card" style="padding:12px">${thumbSVG(r2.track, 'var(--r2)')}${rideHead(r2, 1)}</div>
+      </div>
+      <div class="card" style="padding:14px 16px"><div class="score">
+        ${METRICS.map(([l, get, fm]) => {
+          const a = get(r1.stats), b = get(r2.stats), mx = Math.max(a, b) || 1;
+          return `<div class="lbl">${l}</div>
+            <div class="va" style="${a >= b ? 'font-weight:650' : ''}">${fm(a)}</div>
+            <div class="bl" style="width:${Math.max(2, a/mx*100)}%"></div>
+            <div class="br" style="width:${Math.max(2, b/mx*100)}%"></div>
+            <div class="vb" style="${b >= a ? 'font-weight:650' : ''}">${fm(b)}</div>`; }).join('')}
+        ${BESTS.map(([l, key]) => {
+          const a = r1.bests[key]?.time, b = r2.bests[key]?.time, mx = Math.max(a ?? 0, b ?? 0) || 1;
+          return `<div class="lbl">${l}</div>
+            <div class="va" style="${a && (!b || a <= b) ? 'font-weight:650' : ''}">${a ? fmtDur(a) : '—'}</div>
+            <div class="bl" style="width:${a ? Math.max(2, a/mx*100) : 0}%"></div>
+            <div class="br" style="width:${b ? Math.max(2, b/mx*100) : 0}%"></div>
+            <div class="vb" style="${b && (!a || b <= a) ? 'font-weight:650' : ''}">${b ? fmtDur(b) : '—'}</div>`; }).join('')}
+      </div></div>
+      <div class="card" style="padding:12px">
+        <div class="sub" style="margin-bottom:8px">Per-km splits — Δ colored by whoever was faster on that km</div>
+        <div style="max-height:320px;overflow:auto"><table class="splitdiff">
+          <tr><th>km</th><th><span class="dot" style="background:var(--r1)"></span>time</th>
+              <th><span class="dot" style="background:var(--r2)"></span>time</th><th>Δ</th></tr>
+          ${Array.from({ length: Math.max(r1.splits.length, r2.splits.length) }, (_, i) => {
+            const a = r1.splits[i], b = r2.splits[i];
+            const d = a && b ? b.time - a.time : null;
+            return `<tr><td>${i+1}</td><td>${a ? fmtDur(a.time) : '—'}</td><td>${b ? fmtDur(b.time) : '—'}</td>
+              <td style="color:${d === null ? 'var(--muted)' : d > 0 ? HEX[0] : HEX[1]}">${d === null ? '—' : dDur(d)}</td></tr>`; }).join('')}
+        </table></div>
+      </div>` : `<div class="hint">Select two rides to compare.</div>`}
+    </div>`;
+    app.querySelectorAll('.ridecard').forEach(el => el.onclick = () => {
+      const i = +el.dataset.i, at = state.cSel.indexOf(i);
+      if (at >= 0) state.cSel.splice(at, 1);
+      else { state.cSel.push(i); if (state.cSel.length > 2) state.cSel.shift(); }
+      mount('C');
+    });
+  } },
+};
+
+/* ================= switcher (prototype chrome) ================= */
+const KEYS = Object.keys(variants);
+let mounted = null;
+function currentVariant() {
+  const v = new URLSearchParams(location.search).get('variant');
+  return KEYS.includes(v) ? v : 'A';
+}
+function mount(key) {
+  mounted?.stop?.();
+  liveMaps.splice(0).forEach(m => m.remove());
+  sync.listeners.length = 0;
+  const app = document.getElementById('app');
+  app.innerHTML = '';
+  mounted = variants[key].render(app);
+  document.getElementById('vlabel').textContent = `${key} — ${variants[key].name}`;
+  const u = new URL(location); u.searchParams.set('variant', key); history.replaceState(null, '', u);
+}
+function cycle(dir) {
+  const i = (KEYS.indexOf(currentVariant()) + dir + KEYS.length) % KEYS.length;
+  mount(KEYS[i]);
+}
+document.getElementById('prev').onclick = () => cycle(-1);
+document.getElementById('next').onclick = () => cycle(1);
+document.addEventListener('keydown', e => {
+  if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName) || document.activeElement?.isContentEditable) return;
+  if (e.key === 'ArrowLeft') cycle(-1); if (e.key === 'ArrowRight') cycle(1);
+});
+
+/* ================= boot: real ride + two synthetics ================= */
+(async () => {
+  const doc = new DOMParser().parseFromString(await (await fetch('/airport.gpx')).text(), 'application/xml');
+  const name = doc.querySelector('trk > name')?.textContent ?? 'Ride';
+  const sport = doc.querySelector('trk > type')?.textContent ?? '';
+  const raw = [...doc.getElementsByTagName('trkpt')].map(n => ({
+    lat: +n.getAttribute('lat'), lon: +n.getAttribute('lon'),
+    ele: +(n.getElementsByTagName('ele')[0]?.textContent ?? 0),
+    time: new Date(n.getElementsByTagName('time')[0].textContent).getTime()/1000,
+  }));
+  rides = [
+    deriveRide(raw, name, sport),
+    deriveRide(synthSameRoute(raw), 'Flughafen-Schleife im Gegenwind (synthetic)', sport),
+    deriveRide(synthOtherRoute(raw), 'Feierabendrunde Süd (synthetic)', sport),
+  ];
+  mount(currentVariant());
+})();
+</script>
+</body>
+</html>

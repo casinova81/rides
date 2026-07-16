@@ -1,0 +1,435 @@
+<!doctype html>
+<!-- PROTOTYPE — THROWAWAY. Wayfinder ticket 08 (ride detail page layout).
+     Three structurally different variants of the ride detail page, switchable via ?variant= (A/B/C)
+     and the floating bottom bar / arrow keys. Standalone (no app exists yet).
+     Real numbers: airport.gpx parsed client-side with the locked stats-contract algorithms (ticket 03). -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PROTOTYPE: ride detail — airport.gpx</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.css">
+<script src="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-1: #fcfcfb; --page: #f9f9f7;
+    --ink-1: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+    --grid: #e1e0d9; --baseline: #c3c2b7; --ring: rgba(11,11,11,.10);
+    --ele: #2a78d6;   /* elevation series (blue) */
+    --spd: #4a3aa7;   /* speed series (violet) */
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; background: var(--page); color: var(--ink-1);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  h1 { font-size: 22px; margin: 0; font-weight: 650; }
+  .sub { color: var(--ink-2); font-size: 13px; }
+  .card { background: var(--surface-1); border: 1px solid var(--ring); border-radius: 12px; }
+
+  .tiles { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+  .tile { padding: 12px 14px; }
+  .tile .v { font-size: 24px; font-weight: 650; }
+  .tile .l { color: var(--muted); font-size: 12px; margin-top: 2px; }
+
+  .statlist { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; font-size: 13px; }
+  .statlist dt { color: var(--ink-2); } .statlist dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+
+  table.splits { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; }
+  table.splits th { color: var(--muted); font-weight: 500; text-align: right; padding: 4px 8px; border-bottom: 1px solid var(--grid); }
+  table.splits td { text-align: right; padding: 3px 8px; border-bottom: 1px solid var(--grid); }
+  table.splits th:first-child, table.splits td:first-child { text-align: left; }
+
+  .chart { position: relative; }
+  .chart header { display: flex; justify-content: space-between; align-items: baseline; padding: 8px 12px 0; }
+  .chart header .t { font-size: 12px; color: var(--ink-2); font-weight: 600; }
+  .chart header .cur { font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .chart svg { display: block; width: 100%; touch-action: none; }
+  .tip { position: absolute; pointer-events: none; background: var(--ink-1); color: #fff; font-size: 11px;
+         padding: 4px 7px; border-radius: 6px; white-space: nowrap; transform: translate(-50%, -130%); display: none; z-index: 5;
+         font-variant-numeric: tabular-nums; }
+
+  .pcontrols { display: flex; gap: 8px; align-items: center; }
+  .pcontrols button { background: var(--surface-1); border: 1px solid var(--baseline); color: var(--ink-1);
+    border-radius: 8px; padding: 5px 11px; font-size: 13px; cursor: pointer; }
+  .pcontrols button.on { background: var(--ink-1); color: #fff; border-color: var(--ink-1); }
+  .pcontrols input[type=range] { flex: 1; min-width: 80px; accent-color: var(--ele); }
+
+  details.more summary { cursor: pointer; color: var(--ink-2); font-size: 13px; padding: 10px 0; }
+
+  /* ---- switcher (prototype chrome, not part of the design) ---- */
+  #switcher { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 999;
+    background: #14161a; color: #fff; border-radius: 999px; display: flex; gap: 4px; align-items: center;
+    padding: 6px 10px; font-size: 13px; box-shadow: 0 4px 18px rgba(0,0,0,.35); }
+  #switcher button { background: none; border: none; color: #9fd0ff; font-size: 16px; cursor: pointer; padding: 2px 8px; }
+  #switcher .lbl { min-width: 190px; text-align: center; }
+  #switcher .proto { color: #ff8a80; font-size: 10px; letter-spacing: .5px; margin-right: 4px; }
+
+  .maplibregl-map { font: inherit; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="switcher">
+  <span class="proto">PROTOTYPE</span>
+  <button id="prev" title="previous variant (←)">←</button>
+  <span class="lbl" id="vlabel"></span>
+  <button id="next" title="next variant (→)">→</button>
+</div>
+
+<script>
+"use strict";
+/* ================= stats contract (ticket 03) — compute derived ride from GPX ================= */
+const R = 6371000, D2R = Math.PI / 180;
+const hav = (a, b) => {
+  const dLat = (b.lat-a.lat)*D2R, dLon = (b.lon-a.lon)*D2R;
+  const s = Math.sin(dLat/2)**2 + Math.cos(a.lat*D2R)*Math.cos(b.lat*D2R)*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(s));
+};
+const roll5 = arr => arr.map((_, i) => {
+  const a = Math.max(0, i-2), b = Math.min(arr.length-1, i+2);
+  let s = 0; for (let j = a; j <= b; j++) s += arr[j];
+  return s/(b-a+1);
+});
+
+async function buildRide() {
+  const doc = new DOMParser().parseFromString(await (await fetch('/airport.gpx')).text(), 'application/xml');
+  const name = doc.querySelector('trk > name')?.textContent ?? 'Ride';
+  const sport = doc.querySelector('trk > type')?.textContent ?? '';
+  const raw = [...doc.getElementsByTagName('trkpt')].map(n => ({
+    lat: +n.getAttribute('lat'), lon: +n.getAttribute('lon'),
+    ele: +(n.getElementsByTagName('ele')[0]?.textContent ?? 0),
+    time: new Date(n.getElementsByTagName('time')[0].textContent).getTime()/1000,
+  }));
+  const n = raw.length, t0 = raw[0].time;
+  const t = raw.map(p => Math.round(p.time - t0));
+  const dist = [0]; for (let i = 1; i < n; i++) dist.push(dist[i-1] + hav(raw[i-1], raw[i]));
+  // speed: point-to-point, then 5-pt rolling average
+  const vRaw = raw.map((_, i) => i === 0 ? 0 : (dist[i]-dist[i-1]) / Math.max(1e-9, t[i]-t[i-1]));
+  vRaw[0] = vRaw[1] ?? 0;
+  const speed = roll5(vRaw);
+  // elevation: 5-pt rolling average; gain/loss with 2 m hysteresis
+  const ele = roll5(raw.map(p => p.ele));
+  let gain = 0, loss = 0, anchor = ele[0];
+  for (const e of ele) {
+    const d = e - anchor;
+    if (d >= 2) { gain += d; anchor = e; } else if (d <= -2) { loss += d * -1, anchor = e; }
+  }
+  // moving time: smoothed speed < 2 km/h (0.5556 m/s) = stopped
+  const MOV = 2/3.6; let movingTime = 0;
+  for (let i = 1; i < n; i++) if (speed[i] >= MOV) movingTime += t[i]-t[i-1];
+  // gradient over 100 m rolling window (centered ±50 m)
+  const grad = new Array(n).fill(0);
+  { let j = 0, k = 0;
+    for (let i = 0; i < n; i++) {
+      while (dist[j] < dist[i]-50) j++;
+      while (k < n-1 && dist[k+1] <= dist[i]+50) k++;
+      const dd = dist[k]-dist[j];
+      grad[i] = dd > 20 ? (ele[k]-ele[j])/dd*100 : 0;
+    } }
+  // per-km splits (last partial keeps real length)
+  const splits = []; let s0 = 0;
+  for (let i = 1; i < n; i++) {
+    const kmDone = Math.floor(dist[i]/1000), kmPrev = Math.floor(dist[s0]/1000);
+    if (kmDone > kmPrev || i === n-1) {
+      const len = dist[i]-dist[s0], time = t[i]-t[s0];
+      if (len > 50) splits.push({ km: splits.length+1, len, time,
+        avgSpeed: len/time, eleDelta: ele[i]-ele[s0], avgGradient: (ele[i]-ele[s0])/len*100 });
+      s0 = i;
+    }
+  }
+  // fastest rolling 5/10/20 km windows
+  const best = W => {
+    if (dist[n-1] < W) return null;
+    let bestT = Infinity, bestStart = 0, k = 0;
+    for (let j = 0; j < n; j++) {
+      while (k < n-1 && dist[k] < dist[j]+W) k++;
+      if (dist[k] < dist[j]+W) break;
+      if (t[k]-t[j] < bestT) { bestT = t[k]-t[j]; bestStart = dist[j]; }
+    }
+    return { time: bestT, startDist: bestStart };
+  };
+  return {
+    name, sport, start: new Date(t0*1000),
+    stats: {
+      distance: dist[n-1], duration: t[n-1], movingTime,
+      avgMovingSpeed: dist[n-1]/movingTime, maxSpeed: Math.max(...speed),
+      elevationGain: gain, elevationLoss: loss,
+      maxGradient: Math.max(...grad), minGradient: Math.min(...grad),
+    },
+    splits, bests: { '5k': best(5000), '10k': best(10000), '20k': best(20000) },
+    track: { lat: raw.map(p=>p.lat), lon: raw.map(p=>p.lon), ele, t, dist, speed },
+  };
+}
+
+/* ================= formatting layer: SI stored, de-DE numbers, English labels ================= */
+const nf = d => new Intl.NumberFormat('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d });
+const fmtKm = m => nf(1).format(m/1000) + ' km';
+const fmtKmh = ms => nf(1).format(ms*3.6) + ' km/h';
+const fmtM = m => nf(0).format(m) + ' m';
+const fmtPct = p => nf(1).format(p) + ' %';
+const fmtDur = s => {
+  const h = Math.floor(s/3600), m = Math.floor(s/60)%60, sec = Math.floor(s)%60;
+  return h > 0 ? `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}` : `${m}:${String(sec).padStart(2,'0')}`;
+};
+const fmtDate = d => new Intl.DateTimeFormat('de-DE', { timeZone: 'Europe/Berlin', day:'2-digit', month:'2-digit', year:'numeric' }).format(d);
+const fmtTime = d => new Intl.DateTimeFormat('de-DE', { timeZone: 'Europe/Berlin', hour:'2-digit', minute:'2-digit' }).format(d);
+
+/* ================= shared pieces (charts, map, playback) — layout stays per-variant ================= */
+let ride = null;
+const sync = { listeners: [], goTo(i, src) { for (const l of this.listeners) if (l.src !== src) l.set(i); },
+               clear(src) { for (const l of this.listeners) if (l.src !== src) l.hide?.(); } };
+
+function makeChart(host, { title, ys, color, area, yFmt }) {
+  const { dist } = ride.track, n = ys.length;
+  const wrap = document.createElement('div'); wrap.className = 'chart';
+  wrap.innerHTML = `<header><span class="t">${title}</span><span class="cur"></span></header>`;
+  const H = 150, ml = 62, mr = 10, mt = 6, mb = 18;
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.setAttribute('height', H); wrap.appendChild(svg);
+  const tip = document.createElement('div'); tip.className = 'tip'; wrap.appendChild(tip);
+  host.appendChild(wrap);
+  const cur = wrap.querySelector('.cur');
+  let W, X, Y, lo, hi;
+  function render() {
+    W = wrap.clientWidth || 600;
+    svg.setAttribute('width', W); svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    lo = Math.min(...ys); hi = Math.max(...ys);
+    const pad = (hi-lo)*0.08 || 1; lo -= pad; hi += pad; if (area) lo = Math.min(...ys) - pad;
+    X = d => ml + (d/dist[n-1]) * (W-ml-mr);
+    Y = v => mt + (1-(v-lo)/(hi-lo)) * (H-mt-mb);
+    let g = '';
+    // hairline grid + y ticks (muted, tabular)
+    const ticks = 3;
+    for (let i = 0; i <= ticks; i++) {
+      const v = lo + (hi-lo)*i/ticks, y = Y(v);
+      g += `<line x1="${ml}" x2="${W-mr}" y1="${y}" y2="${y}" stroke="var(--grid)" stroke-width="1"/>` +
+           `<text x="${ml-6}" y="${y+3}" text-anchor="end" font-size="10" fill="var(--muted)" style="font-variant-numeric:tabular-nums">${yFmt(v)}</text>`;
+    }
+    for (let km = 0; km <= dist[n-1]/1000; km += 10)
+      g += `<text x="${X(km*1000)}" y="${H-4}" text-anchor="middle" font-size="10" fill="var(--muted)">${km === 0 ? '0' : km + ' km'}</text>`;
+    // series path (thin marks: 2px line, low-opacity area fill)
+    const step = Math.max(1, Math.floor(n/1200));
+    let dPath = '';
+    for (let i = 0; i < n; i += step) dPath += (i ? 'L' : 'M') + X(dist[i]).toFixed(1) + ' ' + Y(ys[i]).toFixed(1);
+    if (area) g += `<path d="${dPath} L${X(dist[n-1])} ${Y(lo)} L${ml} ${Y(lo)} Z" fill="${color}" fill-opacity="0.14" stroke="none"/>`;
+    g += `<path d="${dPath}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round"/>`;
+    g += `<line x1="${ml}" x2="${W-mr}" y1="${H-mb}" y2="${H-mb}" stroke="var(--baseline)" stroke-width="1"/>`;
+    g += `<line class="cross" y1="${mt}" y2="${H-mb}" stroke="var(--ink-2)" stroke-width="1" stroke-dasharray="3 3" visibility="hidden"/>`;
+    g += `<circle class="dot" r="4.5" fill="${color}" stroke="var(--surface-1)" stroke-width="2" visibility="hidden"/>`;
+    svg.innerHTML = g;
+  }
+  render();
+  const cross = () => svg.querySelector('.cross'), dot = () => svg.querySelector('.dot');
+  const api = { src: wrap,
+    set(i) {
+      const x = X(ride.track.dist[i]), y = Y(ys[i]);
+      cross().setAttribute('x1', x); cross().setAttribute('x2', x); cross().setAttribute('visibility', 'visible');
+      dot().setAttribute('cx', x); dot().setAttribute('cy', y); dot().setAttribute('visibility', 'visible');
+      cur.textContent = `${fmtKm(ride.track.dist[i])} · ${yFmt(ys[i])}`;
+      tip.style.display = 'block'; tip.style.left = x + 'px'; tip.style.top = (y + 24) + 'px';
+      tip.textContent = `${yFmt(ys[i])} @ ${fmtKm(ride.track.dist[i])} · ${fmtDur(ride.track.t[i])}`;
+    },
+    hide() { cross().setAttribute('visibility','hidden'); dot().setAttribute('visibility','hidden');
+             tip.style.display = 'none'; cur.textContent = ''; } };
+  svg.addEventListener('pointermove', e => {
+    const r = svg.getBoundingClientRect();
+    const d = Math.max(0, Math.min(1, (e.clientX - r.left - ml) / (W-ml-mr))) * dist[n-1];
+    let lo2 = 0, hi2 = n-1;
+    while (lo2 < hi2) { const mid = (lo2+hi2)>>1; dist[mid] < d ? lo2 = mid+1 : hi2 = mid; }
+    api.set(lo2); sync.goTo(lo2, wrap);
+  });
+  svg.addEventListener('pointerleave', () => { api.hide(); sync.clear(wrap); });
+  new ResizeObserver(render).observe(wrap);
+  sync.listeners.push(api);
+  return api;
+}
+
+function makeMap(host) {
+  const { lat, lon } = ride.track;
+  const b = lat.reduce((bb, la, i) => bb.extend([lon[i], la]), new maplibregl.LngLatBounds([lon[0], lat[0]], [lon[0], lat[0]]));
+  const map = new maplibregl.Map({ container: host, style: 'https://tiles.openfreemap.org/styles/liberty',
+    bounds: b, fitBoundsOptions: { padding: 40 }, attributionControl: { compact: true } });
+  const cursorEl = document.createElement('div');
+  cursorEl.style.cssText = 'width:14px;height:14px;border-radius:50%;background:var(--ele);border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)';
+  const cursor = new maplibregl.Marker({ element: cursorEl });
+  cursor.setLngLat([lon[0], lat[0]]).addTo(map);
+  map.on('load', () => {
+    map.addSource('track', { type: 'geojson', data: { type: 'Feature',
+      geometry: { type: 'LineString', coordinates: lat.map((la, i) => [lon[i], la]) } } });
+    map.addLayer({ id: 'track', type: 'line', source: 'track',
+      paint: { 'line-color': '#e6413c', 'line-width': 3.5, 'line-opacity': .85 } });
+    // map → charts: nearest trackpoint under the pointer
+    map.on('mousemove', e => {
+      let bi = 0, bd = Infinity; const cs = Math.cos(lat[0]*D2R);
+      for (let i = 0; i < lat.length; i += 2) {
+        const dx = (e.lngLat.lng-lon[i])*cs, dy = e.lngLat.lat-lat[i], d = dx*dx+dy*dy;
+        if (d < bd) { bd = d; bi = i; }
+      }
+      const p = map.project([lon[bi], lat[bi]]);
+      if (Math.hypot(p.x-e.point.x, p.y-e.point.y) < 30) { sync.goTo(bi, host); cursor.setLngLat([lon[bi], lat[bi]]); }
+    });
+  });
+  sync.listeners.push({ src: host, set: i => cursor.setLngLat([lon[i], lat[i]]) });
+  liveMaps.push(map);
+  return map;
+}
+const liveMaps = [];
+
+function makePlayback(host) {
+  const n = ride.track.t.length, dur = ride.track.t[n-1];
+  host.classList.add('pcontrols');
+  host.innerHTML = `<button class="pp">▶</button>
+    <button data-s="10">10×</button><button data-s="50" class="on">50×</button><button data-s="200">200×</button>
+    <input type="range" min="0" max="1000" value="0">`;
+  const pp = host.querySelector('.pp'), scrub = host.querySelector('input');
+  let playing = false, speed = 50, vt = 0, raf, last = null;
+  const idxAt = time => { let lo = 0, hi = n-1;
+    while (lo < hi) { const mid = (lo+hi)>>1; ride.track.t[mid] < time ? lo = mid+1 : hi = mid; } return lo; };
+  pp.onclick = () => { playing = !playing; pp.textContent = playing ? '⏸' : '▶'; };
+  host.querySelectorAll('[data-s]').forEach(b => b.onclick = () => { speed = +b.dataset.s;
+    host.querySelectorAll('[data-s]').forEach(x => x.classList.toggle('on', x === b)); });
+  scrub.oninput = () => { vt = scrub.value/1000*dur; sync.goTo(idxAt(vt), null); };
+  (function loop(ts) {
+    raf = requestAnimationFrame(loop);
+    const dt = last === null ? 0 : Math.min(.1, (ts-last)/1000); last = ts;
+    if (playing) {
+      vt += dt*speed;
+      if (vt >= dur) { vt = dur; playing = false; pp.textContent = '▶'; }
+      scrub.value = Math.round(vt/dur*1000);
+      sync.goTo(idxAt(vt), null);
+    }
+  })(0);
+  return { stop: () => cancelAnimationFrame(raf) };
+}
+
+/* ================= stat groupings (the proposal to react to) ================= */
+const headline = s => [
+  ['Distance', fmtKm(s.distance)], ['Moving time', fmtDur(s.movingTime)],
+  ['Avg speed', fmtKmh(s.avgMovingSpeed)], ['Elevation gain', '↑ ' + fmtM(s.elevationGain)],
+];
+const secondary = s => [
+  ['Max speed', fmtKmh(s.maxSpeed)], ['Elapsed time', fmtDur(s.duration)],
+  ['Elevation loss', '↓ ' + fmtM(s.elevationLoss)], ['Max gradient', fmtPct(s.maxGradient)],
+  ['Min gradient', fmtPct(s.minGradient)], ['Sport', ride?.sport ?? ''],
+];
+function bestsTable(b) {
+  const row = (label, W, r) => r ? [label, `${fmtDur(r.time)} · ${fmtKmh(W/r.time)} · at ${fmtKm(r.startDist)}`] : [label, '—'];
+  return [row('Fastest 5 km', 5000, b['5k']), row('Fastest 10 km', 10000, b['10k']), row('Fastest 20 km', 20000, b['20k'])];
+}
+const tilesHTML = pairs => `<div class="tiles">${pairs.map(([l,v]) =>
+  `<div class="tile card"><div class="v">${v}</div><div class="l">${l}</div></div>`).join('')}</div>`;
+const dlHTML = pairs => `<dl class="statlist">${pairs.map(([l,v]) => `<dt>${l}</dt><dd>${v}</dd>`).join('')}</dl>`;
+const splitsHTML = () => `<table class="splits"><tr><th>km</th><th>time</th><th>Ø speed</th><th>Δ ele</th><th>Ø grad</th></tr>` +
+  ride.splits.map(s => `<tr><td>${s.km}${s.len < 950 ? ` <span style="color:var(--muted)">(${nf(1).format(s.len/1000)})</span>` : ''}</td>` +
+    `<td>${fmtDur(s.time)}</td><td>${fmtKmh(s.avgSpeed)}</td><td>${s.eleDelta >= 0 ? '+' : ''}${nf(0).format(s.eleDelta)} m</td><td>${fmtPct(s.avgGradient)}</td></tr>`).join('') + '</table>';
+const headerHTML = () => `<h1>${ride.name}</h1>
+  <div class="sub">${fmtDate(ride.start)} · ${fmtTime(ride.start)} · ${ride.sport.replace('_',' ')}</div>`;
+
+/* ================= the three variants ================= */
+const variants = {
+  A: { name: 'Map hero', render(app) {
+    app.innerHTML = `<div style="max-width:1000px;margin:0 auto;padding:16px;display:grid;gap:14px">
+      <div>${headerHTML()}</div>
+      <div style="position:relative"><div id="map" class="card" style="height:52vh;min-height:320px;overflow:hidden"></div>
+        <div id="pb" class="card" style="position:absolute;left:12px;right:12px;bottom:12px;padding:8px 12px;background:rgba(252,252,251,.92);backdrop-filter:blur(4px)"></div></div>
+      <div id="tiles"></div>
+      <div class="card" id="c1"></div><div class="card" id="c2"></div>
+      <details class="more"><summary>All stats, splits &amp; personal bests</summary>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;padding:8px 2px 16px">
+          <div class="card" style="padding:12px"><div class="sub" style="margin-bottom:8px">Details</div>${dlHTML(secondary(ride.stats))}
+            <div class="sub" style="margin:14px 0 8px">Fastest windows</div>${dlHTML(bestsTable(ride.bests))}</div>
+          <div class="card" style="padding:12px"><div class="sub" style="margin-bottom:8px">Splits</div>
+            <div style="max-height:300px;overflow:auto">${splitsHTML()}</div></div>
+        </div></details></div>`;
+    app.querySelector('#tiles').innerHTML = tilesHTML(headline(ride.stats));
+    makeChart(app.querySelector('#c1'), { title: 'ELEVATION', ys: ride.track.ele, color: 'var(--ele)', area: true, yFmt: v => fmtM(v) });
+    makeChart(app.querySelector('#c2'), { title: 'SPEED', ys: ride.track.speed, color: 'var(--spd)', area: false, yFmt: v => fmtKmh(v) });
+    makeMap(app.querySelector('#map'));
+    return makePlayback(app.querySelector('#pb'));
+  } },
+
+  B: { name: 'Split dashboard', render(app) {
+    app.innerHTML = `<div style="max-width:1240px;margin:0 auto;padding:16px;display:grid;gap:14px">
+      <div>${headerHTML()}</div>
+      <div style="display:grid;gap:14px;grid-template-columns:300px 1fr" id="cols">
+        <div style="display:grid;gap:14px;align-content:start">
+          <div class="card" style="padding:14px"><div class="sub" style="margin-bottom:8px">Ride</div>${dlHTML([...headline(ride.stats), ...secondary(ride.stats)])}</div>
+          <div class="card" style="padding:14px"><div class="sub" style="margin-bottom:8px">Fastest windows</div>${dlHTML(bestsTable(ride.bests))}</div>
+          <div class="card" style="padding:14px"><div class="sub" style="margin-bottom:8px">Splits</div>
+            <div style="max-height:320px;overflow:auto">${splitsHTML()}</div></div>
+        </div>
+        <div style="display:grid;gap:14px;align-content:start">
+          <div id="map" class="card" style="height:46vh;min-height:300px;overflow:hidden"></div>
+          <div id="pb" class="card" style="padding:8px 12px"></div>
+          <div class="card" id="c1"></div><div class="card" id="c2"></div>
+        </div></div></div>
+      <style>@media (max-width: 860px) { #cols { grid-template-columns: 1fr !important; } #cols > div:first-child { order: 2; } }</style>`;
+    makeChart(app.querySelector('#c1'), { title: 'ELEVATION', ys: ride.track.ele, color: 'var(--ele)', area: true, yFmt: v => fmtM(v) });
+    makeChart(app.querySelector('#c2'), { title: 'SPEED', ys: ride.track.speed, color: 'var(--spd)', area: false, yFmt: v => fmtKmh(v) });
+    makeMap(app.querySelector('#map'));
+    return makePlayback(app.querySelector('#pb'));
+  } },
+
+  C: { name: 'Full-screen cockpit', render(app) {
+    app.innerHTML = `<div style="position:fixed;inset:0">
+      <div id="map" style="position:absolute;inset:0"></div>
+      <div class="card" style="position:absolute;top:12px;left:12px;padding:12px 14px;max-width:340px;background:rgba(252,252,251,.94);backdrop-filter:blur(4px)">
+        ${headerHTML()}
+        <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:8px">${headline(ride.stats).map(([l,v]) =>
+          `<div><div style="font-weight:650;font-size:16px">${v}</div><div class="l" style="color:var(--muted);font-size:11px">${l}</div></div>`).join('')}</div>
+        <button id="more" style="margin-top:10px;background:none;border:1px solid var(--baseline);border-radius:7px;padding:4px 10px;font-size:12px;cursor:pointer">All stats ▸</button>
+      </div>
+      <div id="drawer" class="card" style="position:absolute;top:12px;right:12px;bottom:190px;width:320px;padding:14px;overflow:auto;display:none;background:rgba(252,252,251,.96)">
+        <div class="sub" style="margin-bottom:8px">Details</div>${dlHTML(secondary(ride.stats))}
+        <div class="sub" style="margin:14px 0 8px">Fastest windows</div>${dlHTML(bestsTable(ride.bests))}
+        <div class="sub" style="margin:14px 0 8px">Splits</div>${splitsHTML()}
+      </div>
+      <div style="position:absolute;left:12px;right:12px;bottom:58px;display:grid;gap:8px">
+        <div id="pb" class="card" style="padding:8px 12px;background:rgba(252,252,251,.92);backdrop-filter:blur(4px)"></div>
+        <div style="display:grid;gap:8px;grid-template-columns:1fr 1fr" id="hud">
+          <div class="card" id="c1" style="background:rgba(252,252,251,.92);backdrop-filter:blur(4px)"></div>
+          <div class="card" id="c2" style="background:rgba(252,252,251,.92);backdrop-filter:blur(4px)"></div>
+        </div></div>
+      <style>@media (max-width: 860px) { #hud { grid-template-columns: 1fr !important; } #drawer { left: 12px; width: auto !important; } }</style></div>`;
+    app.querySelector('#more').onclick = () => {
+      const d = app.querySelector('#drawer'); d.style.display = d.style.display === 'none' ? 'block' : 'none'; };
+    makeChart(app.querySelector('#c1'), { title: 'ELEVATION', ys: ride.track.ele, color: 'var(--ele)', area: true, yFmt: v => fmtM(v) });
+    makeChart(app.querySelector('#c2'), { title: 'SPEED', ys: ride.track.speed, color: 'var(--spd)', area: false, yFmt: v => fmtKmh(v) });
+    makeMap(app.querySelector('#map'));
+    return makePlayback(app.querySelector('#pb'));
+  } },
+};
+
+/* ================= switcher (prototype chrome) ================= */
+const KEYS = Object.keys(variants);
+let mounted = null;
+function currentVariant() {
+  const v = new URLSearchParams(location.search).get('variant');
+  return KEYS.includes(v) ? v : 'A';
+}
+function mount(key) {
+  mounted?.stop();
+  liveMaps.splice(0).forEach(m => m.remove());
+  sync.listeners.length = 0;
+  const app = document.getElementById('app');
+  app.innerHTML = '';
+  mounted = variants[key].render(app);
+  document.getElementById('vlabel').textContent = `${key} — ${variants[key].name}`;
+  const u = new URL(location); u.searchParams.set('variant', key); history.replaceState(null, '', u);
+}
+function cycle(dir) {
+  const i = (KEYS.indexOf(currentVariant()) + dir + KEYS.length) % KEYS.length;
+  mount(KEYS[i]);
+}
+document.getElementById('prev').onclick = () => cycle(-1);
+document.getElementById('next').onclick = () => cycle(1);
+document.addEventListener('keydown', e => {
+  if (/^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName) || document.activeElement?.isContentEditable) return;
+  if (e.key === 'ArrowLeft') cycle(-1); if (e.key === 'ArrowRight') cycle(1);
+});
+
+buildRide().then(r => { ride = r; mount(currentVariant()); });
+</script>
+</body>
+</html>
