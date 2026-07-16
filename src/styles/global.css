@@ -1,0 +1,179 @@
+/* Design tokens carried over from the kept prototypes (issues 08/13). Light theme
+   for the app; the heatmap page overrides to full-screen dark on its own. */
+:root {
+  color-scheme: light;
+  --surface-1: #fcfcfb;
+  --page: #f9f9f7;
+  --ink-1: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --baseline: #c3c2b7;
+  --ring: rgba(11, 11, 11, 0.1);
+  --ele: #2a78d6; /* elevation series (blue) */
+  --spd: #4a3aa7; /* speed series (violet) */
+  --ride-1: #2a78d6; /* compare identity: ride 1 (blue) */
+  --ride-2: #e8802a; /* compare identity: ride 2 (orange) */
+  --accent: #0b0b0b;
+  --danger: #c0392b;
+  --gold: #d4a017;
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--page);
+  color: var(--ink-1);
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+a {
+  color: inherit;
+}
+
+.wrap {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 18px 16px 64px;
+}
+
+h1 {
+  font-size: 22px;
+  margin: 0;
+  font-weight: 650;
+}
+.sub {
+  color: var(--ink-2);
+  font-size: 13px;
+}
+
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--ring);
+  border-radius: 12px;
+}
+
+/* headline tiles */
+.tiles {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+.tile {
+  padding: 12px 14px;
+}
+.tile .v {
+  font-size: 24px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.tile .l {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+/* definition-list stats */
+.statlist {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 12px;
+  font-size: 13px;
+}
+.statlist dt {
+  color: var(--ink-2);
+}
+.statlist dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* splits table */
+table.splits {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+table.splits th {
+  color: var(--muted);
+  font-weight: 500;
+  text-align: right;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--grid);
+}
+table.splits td {
+  text-align: right;
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--grid);
+}
+table.splits th:first-child,
+table.splits td:first-child {
+  text-align: left;
+}
+
+/* buttons */
+.btn {
+  display: inline-block;
+  background: var(--surface-1);
+  border: 1px solid var(--baseline);
+  color: var(--ink-1);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: none;
+}
+.btn:hover {
+  border-color: var(--ink-2);
+}
+.btn.on {
+  background: var(--ink-1);
+  color: #fff;
+  border-color: var(--ink-1);
+}
+.btn.danger {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+details.more summary {
+  cursor: pointer;
+  color: var(--ink-2);
+  font-size: 13px;
+  padding: 10px 0;
+}
+
+.maplibregl-map {
+  font: inherit;
+}
+
+/* top navigation */
+.topnav {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 14px 16px 0;
+}
+.topnav .brand {
+  font-weight: 650;
+  text-decoration: none;
+  font-size: 16px;
+}
+.topnav .spacer {
+  flex: 1;
+}
+.topnav a.navlink {
+  color: var(--ink-2);
+  text-decoration: none;
+  font-size: 13px;
+}
+.topnav a.navlink:hover {
+  color: var(--ink-1);
+}

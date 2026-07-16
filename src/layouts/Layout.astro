@@ -1,0 +1,45 @@
+---
+import '../styles/global.css';
+
+interface Props {
+  title?: string;
+  /** Chromeless pages (heatmap) render their own full-screen shell. */
+  bare?: boolean;
+  /** Highlighted nav item. */
+  nav?: 'home' | 'upload' | 'heatmap' | 'compare';
+}
+
+const { title = 'Ride Tracker', bare = false, nav } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+  </head>
+  <body>
+    {
+      !bare && (
+        <nav class="topnav">
+          <a class="brand" href="/">Ride Tracker</a>
+          <span class="spacer" />
+          <a class="navlink" href="/" aria-current={nav === 'home' ? 'page' : undefined}>
+            Rides
+          </a>
+          <a class="navlink" href="/heatmap" aria-current={nav === 'heatmap' ? 'page' : undefined}>
+            Heatmap
+          </a>
+          <a class="navlink" href="/compare" aria-current={nav === 'compare' ? 'page' : undefined}>
+            Compare
+          </a>
+          <a class="navlink" href="/upload" aria-current={nav === 'upload' ? 'page' : undefined}>
+            Upload
+          </a>
+        </nav>
+      )
+    }
+    <slot />
+  </body>
+</html>

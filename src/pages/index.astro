@@ -1,0 +1,27 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { countRides } from '../lib/db';
+
+// Dynamic: read the DB binding per request so new rides appear with no rebuild
+// (issue 02). The full dashboard/library replaces this body in ticket 3b.
+export const prerender = false;
+
+const db = Astro.locals.runtime.env.DB;
+const rideCount = await countRides(db);
+---
+
+<Layout title="Ride Tracker" nav="home">
+  <main class="wrap">
+    <h1>Ride Tracker</h1>
+    <p class="sub">Live from D1 — no rebuild needed.</p>
+    <div class="tiles" style="margin-top:16px">
+      <div class="card tile">
+        <div class="v">{rideCount}</div>
+        <div class="l">Rides stored</div>
+      </div>
+    </div>
+    <p style="margin-top:20px">
+      <a class="btn" href="/upload">Upload rides</a>
+    </p>
+  </main>
+</Layout>
