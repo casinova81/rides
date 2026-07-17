@@ -33,4 +33,9 @@ describe('mapModes — the toggle flat-map', () => {
     expect(choices[0].mode.id).toBe('follow2d');
     expect(mapViews[0].modes[0].id).toBe('follow2d');
   });
+
+  it('advertises 2D follow, 3D tilt, and chase cam in order (ticket 4c)', () => {
+    // The toggle offers exactly the adapter's ordered mode list; 4c adds two modes.
+    expect(mapModes().map((c) => c.mode.id)).toEqual(['follow2d', 'tilt3d', 'chase']);
+  });
 });

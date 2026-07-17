@@ -456,6 +456,25 @@ a.record:hover {
   border-color: var(--track);
   color: #fff;
 }
+.pb-modes {
+  display: flex;
+  gap: 4px;
+}
+.pb-mode {
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: transparent;
+  color: inherit;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pb-mode.active {
+  background: var(--track);
+  border-color: var(--track);
+  color: #fff;
+}
 .pb-scrub {
   flex: 1 1 140px;
   min-width: 120px;

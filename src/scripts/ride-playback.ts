@@ -5,10 +5,12 @@ import { mapModes, type MapView } from '../lib/mapview';
 import { fmtDuration } from '../lib/format';
 import type { RidePose, Track as TrackData } from '../lib/types';
 
-// The ride-detail playback controller (ticket 4b). Wires the engine-agnostic
+// The ride-detail playback controller (ticket 4b + 4c). Wires the engine-agnostic
 // PlaybackCore to a live MapView over the map hero, plus the translucent playback
 // bar. The rAF loop runs only while playing (map rule, issue 07); paused/seek
 // states render a single frame. Everything engine-specific stays behind the seam.
+// The camera-mode toggle swaps the whole view (destroy → create → setMode) while
+// the clock keeps running — the core is untouched by a view swap (issue 09).
 
 /** Mount live playback into the ride-detail hero. No-ops off the detail page. */
 export async function mountRidePlayback(): Promise<void> {
@@ -20,6 +22,7 @@ export async function mountRidePlayback(): Promise<void> {
   const scrub = document.getElementById('pb-scrub') as HTMLInputElement | null;
   const timeEl = document.getElementById('pb-time');
   const speedGroup = document.getElementById('pb-speeds');
+  const modeGroup = document.getElementById('pb-modes');
   if (!dataEl || !container || !hero || !bar || !playBtn || !scrub) return;
 
   let trackData: TrackData;
@@ -32,15 +35,24 @@ export async function mountRidePlayback(): Promise<void> {
 
   const track = new Track(trackData);
 
-  // Default = first mode of the first registered view (issue 09 growth path); the
-  // 2D/3D/chase toggle grows from the same registry in later tickets. Async create
-  // lazy-loads the map engine bundle. On failure we leave the static SVG placeholder
-  // in place rather than showing a broken hero.
-  const [{ view: factory, mode }] = mapModes();
-  let view: MapView;
+  // The toggle is the flat-mapped registry (issue 09 growth path): each entry is a
+  // {view factory, mode}. A mode change rebuilds the view from its factory, so the
+  // controller never hard-codes an engine or a mode. Async create lazy-loads the
+  // map bundle.
+  const choices = mapModes();
+  let view: MapView | null = null;
+
+  /** Build (or rebuild) the live view for `modeId`, replacing any current one. */
+  const buildView = async (modeId: string): Promise<void> => {
+    const choice = choices.find((c) => c.mode.id === modeId) ?? choices[0];
+    const next = await choice.view.create(container, track, {});
+    next.setMode(choice.mode.id);
+    view = next;
+  };
+
+  // On initial failure we leave the static SVG placeholder rather than a broken hero.
   try {
-    view = await factory.create(container, track, {});
-    view.setMode(mode.id);
+    await buildView(choices[0].mode.id);
   } catch (err) {
     console.error('Ride map failed to load:', err);
     return;
@@ -57,6 +69,7 @@ export async function mountRidePlayback(): Promise<void> {
   let rafId = 0;
   let lastTs = 0;
   let scrubbing = false;
+  let swapping = false;
 
   const setPlayLabel = () => {
     playBtn.textContent = core.playing ? '⏸' : '▶';
@@ -68,7 +81,9 @@ export async function mountRidePlayback(): Promise<void> {
   };
 
   const render = (pose: RidePose) => {
-    view.updateFrame(pose);
+    // During a mode swap there's briefly no live view (destroy → create); the clock
+    // still advances and the bar still updates, the camera just catches up on rebuild.
+    if (view) view.updateFrame(pose);
     if (!scrubbing) scrub.value = String(Math.round(core.progress * scrubMax));
     setClock();
     setPlayLabel();
@@ -111,6 +126,30 @@ export async function mountRidePlayback(): Promise<void> {
       .forEach((b) => b.classList.toggle('active', b === btn));
   });
 
+  modeGroup?.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest<HTMLElement>('[data-mode]');
+    if (!btn || swapping || !btn.dataset.mode) return;
+    const modeId = btn.dataset.mode;
+    modeGroup
+      .querySelectorAll<HTMLElement>('[data-mode]')
+      .forEach((b) => b.classList.toggle('active', b === btn));
+
+    // Swap the whole engine view (issue 09: destroy → create → setMode). The clock
+    // is untouched, so playback keeps running through the rebuild; we place the new
+    // camera at the current pose once it's ready. Destroy first so two WebGL
+    // contexts never coexist.
+    swapping = true;
+    const old = view;
+    view = null;
+    old?.destroy();
+    void buildView(modeId)
+      .catch((err) => console.error('Camera mode switch failed:', err))
+      .finally(() => {
+        swapping = false;
+        renderOnce();
+      });
+  });
+
   scrub.addEventListener('input', () => {
     scrubbing = true;
     core.seek((Number(scrub.value) / scrubMax) * core.duration);
@@ -125,7 +164,7 @@ export async function mountRidePlayback(): Promise<void> {
     'pagehide',
     () => {
       if (rafId) cancelAnimationFrame(rafId);
-      view.destroy();
+      view?.destroy();
     },
     { once: true },
   );
