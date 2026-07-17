@@ -24,8 +24,13 @@ export const SPEED_STEPS = [10, 50, 200, 500] as const;
 export interface PlaybackOptions {
   /** Position smoothing time constant, seconds (issue 07 default 0.6). */
   positionTau?: number;
-  /** Bearing smoothing time constant, seconds (issue 07 default 1.2). */
-  bearingTau?: number;
+  /**
+   * Bearing smoothing length constant, metres (default 12). The heading relaxes
+   * per metre of track travelled — not per real second — so the arrow turns in
+   * step with the corners at every playback multiplier instead of lagging by a
+   * fixed wall-clock delay that spans whole blocks at 200×.
+   */
+  bearingLength?: number;
   /** Look-ahead along the track for the heading, metres (issue 07 default 25). */
   lookahead?: number;
 }
@@ -38,7 +43,7 @@ interface Vec {
 export class PlaybackCore {
   private readonly track: Track;
   private readonly positionTau: number;
-  private readonly bearingTau: number;
+  private readonly bearingLength: number;
   private readonly lookahead: number;
 
   private vt = 0; // virtual (ride) time, seconds
@@ -52,7 +57,7 @@ export class PlaybackCore {
   constructor(track: Track, opts: PlaybackOptions = {}) {
     this.track = track;
     this.positionTau = opts.positionTau ?? 0.6;
-    this.bearingTau = opts.bearingTau ?? 1.2;
+    this.bearingLength = opts.bearingLength ?? 12;
     this.lookahead = opts.lookahead ?? 25;
   }
 
@@ -123,6 +128,7 @@ export class PlaybackCore {
     // clock's raw distance (τ = positionTau), then sample the track *at* the
     // smoothed distance — the pose stays exactly on the polyline.
     const k = this.positionTau > 0 ? 1 - Math.exp(-dt / this.positionTau) : 1;
+    const prevDist = this.smoothDist;
     if (this.smoothDist === null) {
       this.smoothDist = raw.dist;
     } else {
@@ -132,8 +138,12 @@ export class PlaybackCore {
 
     // Bearing: circular (vector) smoothing of a look-ahead heading — averaging the
     // direction vectors, so 350°→10° relaxes through north, not through the south.
+    // Relaxation is per metre travelled (bearingLength), not per second: the arrow
+    // turns with the corners at any playback multiplier — a real-time constant
+    // would leave it pointing blocks behind at 200×.
     const rawBear = this.track.bearingAt(this.smoothDist, this.lookahead);
-    const bk = this.bearingTau > 0 ? 1 - Math.exp(-dt / this.bearingTau) : 1;
+    const travelled = prevDist === null ? 0 : Math.abs(this.smoothDist - prevDist);
+    const bk = this.bearingLength > 0 ? 1 - Math.exp(-travelled / this.bearingLength) : 1;
     const target: Vec = { x: Math.sin(rawBear * D2R), y: Math.cos(rawBear * D2R) };
     if (this.bearVec === null) {
       this.bearVec = target;

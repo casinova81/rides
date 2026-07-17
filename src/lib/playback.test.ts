@@ -169,6 +169,34 @@ describe('PlaybackCore — pose smoothing', () => {
   });
 });
 
+describe('PlaybackCore — bearing turns in step with the track', () => {
+  it('aligns with the new heading shortly after a 90° corner, at any speed step', () => {
+    // Bearing relaxes per metre travelled, so promptness must not depend on the
+    // playback multiplier: shortly past the corner (look-ahead 25 m + a few
+    // 12 m length constants) the arrow points down the new leg.
+    for (const speed of SPEED_STEPS) {
+      const track = buildTrack([
+        { bearing: 90, length: 400 },
+        { bearing: 0, length: 400 },
+      ]);
+      const pb = new PlaybackCore(track);
+      pb.setSpeed(speed);
+      pb.play();
+      let bearing = NaN;
+      // Realistic ~60 fps frames; keep framing after the clock ends (the pose
+      // trails the clock at high multipliers and settles while paused) until the
+      // pose itself is 80 m past the corner.
+      for (let i = 0; i < 5000; i++) {
+        const pose = pb.frame(0.016);
+        bearing = pose.bearing;
+        if (pose.distance >= 480) break;
+      }
+      const off = Math.min(bearing, 360 - bearing); // angular distance from north
+      expect(off).toBeLessThan(10);
+    }
+  });
+});
+
 describe('PlaybackCore — bearing smoothing across the 360°→0° wrap', () => {
   it('smooths through north, never swinging toward the south', () => {
     // Heads 350° (just west of north), then turns to 10° (just east of north).
