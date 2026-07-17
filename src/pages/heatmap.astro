@@ -1,0 +1,53 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { loadIndex } from '../lib/db';
+
+// The everywhere-I've-ridden heatmap (ticket 5 / issue 12). A chromeless
+// full-screen page: the OpenFreeMap dark basemap with one binned intensity layer,
+// computed client-side from the index polylines (issue 12: ~110 ms / 400 rides, no
+// precompute needed). Dynamic so a freshly-uploaded ride appears with no rebuild;
+// MapLibre loads only on this page. Purely ambient — no hover/click.
+export const prerender = false;
+
+const db = Astro.locals.runtime.env.DB;
+const index = await loadIndex(db);
+const polylines = index.rides.map((r) => r.polyline);
+
+// Only the encoded polylines cross to the client — the binning re-derives cells
+// there. Escape `<` so a value can't break out of the JSON data island.
+const heatData = JSON.stringify(polylines).replace(/</g, '\\u003c');
+const hasRides = polylines.length > 0;
+---
+
+<Layout title="Heatmap · Ride Tracker" bare>
+  <div class="heat-shell">
+    <nav class="heat-nav">
+      <a class="brand" href="/">Ride Tracker</a>
+      <a href="/">Rides</a>
+      <a class="active" href="/heatmap" aria-current="page">Heatmap</a>
+      <a href="/compare">Compare</a>
+      <a href="/upload">Upload</a>
+    </nav>
+
+    {
+      hasRides ? (
+        <div id="heat-map" class="heat-map" />
+      ) : (
+        <div class="heat-empty">
+          <p>No rides yet — <a href="/upload">upload your first GPX</a> to light up the map.</p>
+        </div>
+      )
+    }
+  </div>
+
+  {
+    hasRides && (
+      <script id="heat-data" type="application/json" is:inline set:html={heatData} />
+    )
+  }
+</Layout>
+
+<script>
+  import { mountHeatmap } from '../scripts/heatmap-map';
+  mountHeatmap();
+</script>
