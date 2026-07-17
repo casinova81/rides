@@ -63,3 +63,18 @@ export interface ModeChoice {
 export function mapModes(views: ReadonlyArray<MapViewFactory> = mapViews): ModeChoice[] {
   return views.flatMap((view) => view.modes.map((mode) => ({ view, mode })));
 }
+
+/**
+ * The view factory that advertises `modeId`, or null if none does. This is how the
+ * controller tells a same-engine mode change (both modes resolve to one factory → a
+ * cheap in-place `setMode`) from a cross-engine view swap (different factories →
+ * `destroy` → `create` → `setMode`, issue 09). Today MapLibre owns every mode, so
+ * every toggle stays in-engine; appending a Cesium factory makes globe↔map a swap
+ * with no controller change.
+ */
+export function viewForMode(
+  modeId: string,
+  views: ReadonlyArray<MapViewFactory> = mapViews,
+): MapViewFactory | null {
+  return views.find((view) => view.modes.some((mode) => mode.id === modeId)) ?? null;
+}

@@ -53,7 +53,9 @@ Keep `@cloudflare/vitest-pool-workers` pinned at 0.12.x.
 
 - `playback.ts` — engine-agnostic core: owns the clock (10×–500×, play/pause/seek) and pose smoothing (position τ 0.6 s; bearing smoothed circularly per metre travelled from ~25 m look-ahead; smoothing resets on seek). Emits one absolute `RidePose` per frame.
 - `mapview.ts` — the `MapView`/`MapViewFactory` seam. Views place the camera exactly on `updateFrame`, never ease, and keep no pose-derived state. A future engine (e.g. Cesium) is a sibling factory appended to the mode list; playback code never changes.
-- `maplibre-view.ts` — the MapLibre adapter: 2D follow (default), 3D tilt, chase cam (camera altitude clamped from GPX elevations, never `queryTerrainElevation`; basemap 3D buildings hidden in chase mode). Mode switches swap the whole view (`destroy` → `create` → `setMode`) while the clock keeps running. The engine bundle is lazy-`import()`ed inside `create`.
+- `maplibre-view.ts` — the MapLibre adapter: 2D follow (default), 3D tilt, chase cam (camera altitude clamped from GPX elevations, never `queryTerrainElevation`; basemap 3D buildings hidden in chase mode). The engine bundle is lazy-`import()`ed inside `create`.
+
+Mode changes split by ownership (issue 09): a mode owned by the *live* engine switches in place via `view.setMode()` (no teardown — every 2D↔3D↔chase toggle today, since MapLibre owns all three); only switching to a mode owned by a *different* engine swaps the whole view (`destroy` → `create` → `setMode`). Either way the clock keeps running. `viewForMode(modeId)` in `mapview.ts` is the pivot; the controller compares it to the live factory.
 
 `src/scripts/` holds the client-side controllers Astro pages load (playback, charts, compare, heatmap); `src/lib/` stays pure and unit-testable. Chart↔map↔playback cursor sync is bidirectional and distance-keyed; the map cursor is click-only (hover never scrubs).
 

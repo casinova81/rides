@@ -1,7 +1,7 @@
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { Track } from '../lib/track';
 import { PlaybackCore } from '../lib/playback';
-import { mapModes, type MapView } from '../lib/mapview';
+import { mapModes, viewForMode, type MapView, type MapViewFactory } from '../lib/mapview';
 import { fmtDuration } from '../lib/format';
 import { mountCharts } from './ride-charts';
 import type { RidePose, Track as TrackData } from '../lib/types';
@@ -43,6 +43,8 @@ export async function mountRidePlayback(): Promise<void> {
   // map bundle.
   const choices = mapModes();
   let view: MapView | null = null;
+  // The live engine — the pivot for the swap-vs-setMode decision below (see `viewForMode`).
+  let currentFactory: MapViewFactory | null = null;
 
   // The map-cursor → shared-cursor channel (ticket 4d). Late-bound: the map is built
   // in the background, but it only ever fires this at runtime, by when `onCursor`
@@ -58,6 +60,7 @@ export async function mountRidePlayback(): Promise<void> {
     });
     next.setMode(choice.mode.id);
     view = next;
+    currentFactory = choice.view;
     // The map is live now — hide the static SVG placeholder (idempotent across swaps).
     hero.classList.add('hero--live');
   };
@@ -155,13 +158,24 @@ export async function mountRidePlayback(): Promise<void> {
       .querySelectorAll<HTMLElement>('[data-mode]')
       .forEach((b) => b.classList.toggle('active', b === btn));
 
-    // Swap the whole engine view (issue 09: destroy → create → setMode). The clock
-    // is untouched, so playback keeps running through the rebuild; we place the new
-    // camera at the current pose once it's ready. Destroy first so two WebGL
-    // contexts never coexist.
+    // Same engine? Switch the camera mode in place — no teardown (issue 09: a mode
+    // change within one view is `setMode`, only a *view* swap destroys/recreates).
+    // This keeps every 2D↔3D↔chase toggle instant — no WebGL context churn, no
+    // reload flash — since MapLibre owns all three modes today.
+    if (view && viewForMode(modeId) === currentFactory) {
+      view.setMode(modeId);
+      renderOnce();
+      return;
+    }
+
+    // Different engine (or no live view yet): swap the whole view (issue 09: destroy
+    // → create → setMode). The clock is untouched, so playback keeps running through
+    // the rebuild; we place the new camera at the current pose once it's ready.
+    // Destroy first so two WebGL contexts never coexist.
     swapping = true;
     const old = view;
     view = null;
+    currentFactory = null;
     old?.destroy();
     void buildView(modeId)
       .catch((err) => console.error('Camera mode switch failed:', err))
@@ -194,11 +208,15 @@ export async function mountRidePlayback(): Promise<void> {
   // Initial state: the clock and the chart cursors are primed at the start straight
   // away (no map needed). The map is built in the background — its constructor's
   // fitted overview stays until the first play; on failure the static SVG hero
-  // remains and the charts + bar still work.
+  // remains and the charts + bar still work. `swapping` guards this first build too,
+  // so a mode click mid-load can't race a second `create` (issue 09: one live view).
   setClock();
   setPlayLabel();
   charts.update(0);
-  void buildView(choices[0].mode.id).catch((err) =>
-    console.error('Ride map failed to load:', err),
-  );
+  swapping = true;
+  void buildView(choices[0].mode.id)
+    .catch((err) => console.error('Ride map failed to load:', err))
+    .finally(() => {
+      swapping = false;
+    });
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mapModes, mapViews } from './mapview';
+import { mapModes, mapViews, viewForMode } from './mapview';
 import type { MapViewFactory } from './mapview';
 
 // The MapView seam's engine-agnostic surface (issue 09 / ticket 4b): the toggle
@@ -37,5 +37,39 @@ describe('mapModes — the toggle flat-map', () => {
   it('advertises 2D follow, 3D tilt, and chase cam in order (ticket 4c)', () => {
     // The toggle offers exactly the adapter's ordered mode list; 4c adds two modes.
     expect(mapModes().map((c) => c.mode.id)).toEqual(['follow2d', 'tilt3d', 'chase']);
+  });
+});
+
+describe('viewForMode — same-engine setMode vs. cross-engine swap (issue 09)', () => {
+  const ml = fakeView([
+    { id: 'follow', label: 'Follow' },
+    { id: 'tilt', label: 'Tilt' },
+  ]);
+  const globe = fakeView([{ id: 'globe', label: 'Globe' }]);
+  const views = [ml, globe];
+
+  it('resolves a mode id to the view that advertises it', () => {
+    expect(viewForMode('follow', views)).toBe(ml);
+    expect(viewForMode('tilt', views)).toBe(ml);
+    expect(viewForMode('globe', views)).toBe(globe);
+  });
+
+  it('reports the same owner for two modes of one engine (→ in-place setMode)', () => {
+    // follow→tilt stays inside the MapLibre engine: the controller must NOT tear down.
+    expect(viewForMode('follow', views)).toBe(viewForMode('tilt', views));
+  });
+
+  it('reports different owners across engines (→ destroy → create swap)', () => {
+    expect(viewForMode('tilt', views)).not.toBe(viewForMode('globe', views));
+  });
+
+  it('returns null for an unknown mode id', () => {
+    expect(viewForMode('nope', views)).toBeNull();
+  });
+
+  it('defaults to the real registry — every advertised mode resolves to a view', () => {
+    for (const { mode } of mapModes()) {
+      expect(viewForMode(mode.id)).not.toBeNull();
+    }
   });
 });
