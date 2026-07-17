@@ -20,13 +20,18 @@ export async function mountHeatmap(): Promise<void> {
   const container = document.getElementById('heat-map');
   const dataEl = document.getElementById('heat-data');
   if (!container || !dataEl) return;
-
-  let polylines: string[];
   try {
-    polylines = JSON.parse(dataEl.textContent ?? '[]') as string[];
-  } catch {
-    return;
+    await mount(container, dataEl);
+  } catch (err) {
+    // Never fail to a silent black screen — surface the reason on the page.
+    console.error('Heatmap failed to mount:', err);
+    container.textContent = `Heatmap failed: ${err instanceof Error ? err.message : String(err)}`;
+    container.style.cssText += ';color:#fff;display:grid;place-items:center;padding:24px;text-align:center;';
   }
+}
+
+async function mount(container: HTMLElement, dataEl: HTMLElement): Promise<void> {
+  const polylines = JSON.parse(dataEl.textContent ?? '[]') as string[];
 
   // Bin on the main thread — proven ~110 ms for 400 rides (issue 12), well within
   // one frame's worth of jank on load, so no worker is warranted at this scale.

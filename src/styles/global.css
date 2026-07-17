@@ -396,7 +396,11 @@ a.record:hover {
   inset: 0;
   background: #14161a; /* dark basemap backdrop while tiles load */
 }
-.heat-map {
+/* `.heat-shell .heat-map` (specificity 0,2,0) must outrank maplibre-gl.css's
+   `.maplibregl-map { position: relative }` (0,1,0) — MapLibre adds that class to
+   this same element, and if it wins the absolute box collapses to 0 height and the
+   whole map renders black. Same gotcha the hero solves at `.hero .hero__map`. */
+.heat-shell .heat-map {
   position: absolute;
   inset: 0;
 }
