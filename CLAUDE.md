@@ -15,8 +15,9 @@ Private single-user ride-tracking site: Komoot GPX upload, stats, MapLibre playb
 - `npm test` — all tests (`vitest run`); `npm run test:watch` for watch mode
 - `npx vitest run --project unit` / `--project worker` — one test project
 - `npx vitest run src/lib/derive.test.ts` — single file; add `-t "name"` for a single test
-- `npm run deploy` — full pipeline in locked order: `astro check` → `wrangler d1 migrations apply rides-db --remote` → `astro build` → `wrangler deploy` (a deploy can never skip a migration)
+- `npm run deploy` — full pipeline in locked order: `astro check` → `wrangler d1 migrations apply rides-db --remote` → `npm run build` → `wrangler deploy` (a deploy can never skip a migration)
 - `npm run build` then `npm run preview` — run the built worker locally under wrangler
+- `npm run copy:cesium` — stage CesiumJS runtime assets into `public/cesium/` (gitignored). Runs automatically via `predev`/`prebuild`, so `dev`, `build`, and `deploy` all trigger it; only run it by hand if `public/cesium/` is missing outside those flows.
 
 ## Testing setup (two seams, two environments)
 
@@ -49,13 +50,16 @@ Keep `@cloudflare/vitest-pool-workers` pinned at 0.12.x.
 3. **Reads** (`db.ts`): `rides` table holds summary JSON columns; the ~200 KB columnar track lives in a separate `ride_tracks` table so index queries never touch it.
 4. **Records are never stored** — `loadIndex` recomputes all 8 from the current rows on every read, so replace/delete can never strand a stale leaderboard. Deletes self-heal on the next index read.
 
-### Playback engine (three modules behind a seam)
+### Playback engine (core + seam + two engines)
 
 - `playback.ts` — engine-agnostic core: owns the clock (10×–500×, play/pause/seek) and pose smoothing (position τ 0.6 s; bearing smoothed circularly per metre travelled from ~25 m look-ahead; smoothing resets on seek). Emits one absolute `RidePose` per frame.
-- `mapview.ts` — the `MapView`/`MapViewFactory` seam. Views place the camera exactly on `updateFrame`, never ease, and keep no pose-derived state. A future engine (e.g. Cesium) is a sibling factory appended to the mode list; playback code never changes.
-- `maplibre-view.ts` — the MapLibre adapter: 2D follow (default), 3D tilt, chase cam (camera altitude clamped from GPX elevations, never `queryTerrainElevation`; basemap 3D buildings hidden in chase mode). The engine bundle is lazy-`import()`ed inside `create`.
+- `mapview.ts` — the `MapView`/`MapViewFactory` seam plus the ordered `mapViews` registry. Views place the camera exactly on `updateFrame`, never ease, and keep no pose-derived state. Each engine is one factory in `mapViews`; the toggle flat-maps every factory's advertised `modes` into its button list, so adding an engine is a one-line append with no playback change.
+- `maplibre-view.ts` — the MapLibre adapter: 2D follow (default), 3D tilt, chase cam (camera altitude clamped from GPX elevations, never `queryTerrainElevation`; basemap 3D buildings hidden in chase mode).
+- `cesium-view.ts` — the CesiumJS adapter: one "Globe" mode, an ambient whole-ride view on a 3D Earth that orbits the ride as playback runs. Keyless — OpenStreetMap imagery + the default ellipsoid globe (no Ion token, no terrain mesh); the line and camera use the GPX's own elevations. Orbit math is pure in `globe-cam.ts` (heading is a function of ride progress, so it stays absolute per the seam). Runs `requestRenderMode` (renders on change, not a constant loop).
 
-Mode changes split by ownership (issue 09): a mode owned by the *live* engine switches in place via `view.setMode()` (no teardown — every 2D↔3D↔chase toggle today, since MapLibre owns all three); only switching to a mode owned by a *different* engine swaps the whole view (`destroy` → `create` → `setMode`). Either way the clock keeps running. `viewForMode(modeId)` in `mapview.ts` is the pivot; the controller compares it to the live factory.
+Both engine bundles are lazy-`import()`ed inside `create`, so a ride only downloads MapLibre until the Globe mode is first selected (then Cesium). Cesium fetches its Workers/Assets/Widgets at runtime from `/cesium/` (`CESIUM_BASE_URL`), staged there by `scripts/copy-cesium.mjs`.
+
+Mode changes split by ownership (issue 09): a mode owned by the *live* engine switches in place via `view.setMode()` (no teardown — every 2D↔3D↔chase toggle, since MapLibre owns all three); switching to a mode owned by a *different* engine (the Globe) swaps the whole view (`destroy` → `create` → `setMode`). Either way the clock keeps running. `viewForMode(modeId)` in `mapview.ts` is the pivot; the controller compares it to the live factory.
 
 `src/scripts/` holds the client-side controllers Astro pages load (playback, charts, compare, heatmap); `src/lib/` stays pure and unit-testable. Chart↔map↔playback cursor sync is bidirectional and distance-keyed; the map cursor is click-only (hover never scrubs).
 

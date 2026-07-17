@@ -34,9 +34,10 @@ describe('mapModes — the toggle flat-map', () => {
     expect(mapViews[0].modes[0].id).toBe('follow2d');
   });
 
-  it('advertises 2D follow, 3D tilt, and chase cam in order (ticket 4c)', () => {
-    // The toggle offers exactly the adapter's ordered mode list; 4c adds two modes.
-    expect(mapModes().map((c) => c.mode.id)).toEqual(['follow2d', 'tilt3d', 'chase']);
+  it('advertises the MapLibre modes then the Cesium globe, in registry order', () => {
+    // MapLibre owns follow/tilt/chase; the Cesium engine appends "globe" (issue 09
+    // growth path — a sibling factory grows the toggle with no playback change).
+    expect(mapModes().map((c) => c.mode.id)).toEqual(['follow2d', 'tilt3d', 'chase', 'globe']);
   });
 });
 

@@ -4,3 +4,6 @@ dist/
 .wrangler/
 *.log
 .DS_Store
+
+# Vendored CesiumJS runtime assets, staged from node_modules by scripts/copy-cesium.mjs
+public/cesium/

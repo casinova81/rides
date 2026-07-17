@@ -1,6 +1,7 @@
 import type { Track } from './track';
 import type { RidePose } from './types';
 import { maplibreFactory } from './maplibre-view';
+import { cesiumFactory } from './cesium-view';
 
 // The MapView seam (issue 09). A whole map engine is one adapter satisfying one
 // `MapViewFactory`; playback needs only "show this track, then place the camera at
@@ -48,10 +49,12 @@ export interface MapView {
 }
 
 /**
- * The ordered engine registry (issue 09 growth path). One MapLibre view today;
- * appending a Cesium factory here is the only change a globe engine needs.
+ * The ordered engine registry (issue 09 growth path). The MapLibre engine owns the
+ * follow/tilt/chase modes; the Cesium engine adds the "Globe" mode. The toggle
+ * flat-maps their modes in this order, and the controller swaps engines when a
+ * chosen mode belongs to a different factory than the live one — no playback change.
  */
-export const mapViews: ReadonlyArray<MapViewFactory> = [maplibreFactory];
+export const mapViews: ReadonlyArray<MapViewFactory> = [maplibreFactory, cesiumFactory];
 
 /** A toggle entry: which mode, and the view that owns it. */
 export interface ModeChoice {
