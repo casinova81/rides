@@ -54,7 +54,12 @@ export async function mountHeatmap(): Promise<void> {
   ro.observe(container);
 
   map.on('load', () => {
-    map.addSource(SOURCE, { type: 'geojson', data: fc });
+    // `tolerance: 0` disables geojson-vt's Douglas-Peucker simplification. Every
+    // binned edge is a single ~25 m grid step, so at the fitted overview zoom the
+    // default tolerance (0.375 tile units) collapses them all below a pixel and
+    // drops the entire layer — the map renders empty. Keeping full fidelity costs
+    // nothing here: the archive is already simplified upstream (DP-15 m polylines).
+    map.addSource(SOURCE, { type: 'geojson', data: fc, tolerance: 0 });
     map.addLayer({
       id: LAYER,
       type: 'line',
