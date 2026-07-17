@@ -1,5 +1,15 @@
 import { describe, it, expect } from 'vitest';
-import { fmtKm, fmtElevation, fmtSpeedKmh, fmtDuration, fmtDate } from './format';
+import {
+  fmtKm,
+  fmtElevation,
+  fmtSpeedKmh,
+  fmtDuration,
+  fmtDate,
+  fmtTime,
+  fmtGradient,
+  fmtSport,
+  fmtEleDelta,
+} from './format';
 
 // The single formatting layer (issue 03): stored values are SI; display is de-DE
 // (comma decimals, DD.MM.YYYY) with times in Europe/Berlin. English labels live
@@ -35,5 +45,30 @@ describe('format — de-DE display of SI values', () => {
     expect(fmtDate('2026-07-05T00:30:00Z')).toBe('05.07.2026');
     // 23:30 UTC on the 4th is 01:30 the 5th in Berlin — rolls to the next day
     expect(fmtDate('2026-07-04T23:30:00Z')).toBe('05.07.2026');
+  });
+
+  it('formats a UTC ISO instant as a 24-h Berlin wall-clock time', () => {
+    expect(fmtTime('2026-07-05T10:00:57Z')).toBe('12:00'); // +2 in summer
+    expect(fmtTime('2026-01-05T10:00:00Z')).toBe('11:00'); // +1 in winter
+    expect(fmtTime('2026-07-04T23:30:00Z')).toBe('01:30'); // rolls past midnight
+  });
+
+  it('renders a gradient percentage with a comma decimal and sign', () => {
+    expect(fmtGradient(7.2)).toBe('7,2 %');
+    expect(fmtGradient(-4.15)).toBe('-4,2 %');
+    expect(fmtGradient(0)).toBe('0,0 %');
+  });
+
+  it('renders a signed elevation delta in whole metres', () => {
+    expect(fmtEleDelta(12)).toBe('+12 m');
+    expect(fmtEleDelta(-8)).toBe('-8 m');
+    expect(fmtEleDelta(0)).toBe('0 m');
+    expect(fmtEleDelta(-0.4)).toBe('0 m'); // rounds to -0 — must not render as "-0 m"
+  });
+
+  it('prettifies a raw Komoot sport code into an English label', () => {
+    expect(fmtSport('e_bike')).toBe('E Bike');
+    expect(fmtSport('cycling')).toBe('Cycling');
+    expect(fmtSport('')).toBe('');
   });
 });

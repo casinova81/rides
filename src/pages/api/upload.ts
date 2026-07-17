@@ -1,17 +1,12 @@
 import type { APIRoute } from 'astro';
 import { storeRide, validateUploadBody, UploadValidationError } from '../../lib/upload-store';
+import { json } from '../../lib/http';
 
 // The single-ride upload endpoint (issue 02: an Astro API route compiled into the
 // same Worker). The browser parses the GPX and derives the payload; this route
 // only validates the shape and stores it (R2 + D1), then reports the outcome and
 // which records the ride broke. Dynamic — it reads/writes the bindings per request.
 export const prerender = false;
-
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  });
 
 export const POST: APIRoute = async ({ request, locals }) => {
   let raw: unknown;

@@ -341,6 +341,80 @@ a.record:hover {
   letter-spacing: 0.03em;
 }
 
+/* ride detail (issue 04 / ticket 4a) */
+.detail-head {
+  margin-bottom: 14px;
+}
+.detail-sub {
+  margin: 4px 0 0;
+}
+/* map-hero placeholder — a static route line until the live map (ticket 4b) */
+.hero {
+  margin-bottom: 14px;
+  border: 1px solid var(--ring);
+  border-radius: 12px;
+  background:
+    linear-gradient(var(--surface-1), var(--page)),
+    repeating-linear-gradient(0deg, transparent 0 23px, var(--grid) 23px 24px);
+  overflow: hidden;
+}
+.hero .hero-line {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+/* Four headline tiles: 2×2 on mobile, one row on wider screens. */
+.detail-tiles {
+  grid-template-columns: repeat(2, 1fr);
+}
+@media (min-width: 640px) {
+  .detail-tiles {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+.detail-more {
+  margin-top: 8px;
+}
+.detail-more > summary {
+  padding: 12px 0;
+}
+.disclosure-grid {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: 1fr;
+}
+@media (min-width: 560px) {
+  .disclosure-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+.disclosure-block {
+  margin-top: 4px;
+}
+.disclosure-block > h2 {
+  font-size: 13px;
+  font-weight: 650;
+  margin: 0 0 8px;
+}
+.disclosure-block .splits {
+  margin-top: 2px;
+}
+.detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 32px;
+  padding-top: 16px;
+  border-top: 1px solid var(--grid);
+}
+.delete-status {
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.not-found {
+  margin-top: 40px;
+}
+
 /* upload drop zone + results (issue 06) */
 .dropzone {
   display: flex;

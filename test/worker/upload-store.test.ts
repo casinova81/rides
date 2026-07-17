@@ -1,6 +1,11 @@
 import { env } from 'cloudflare:test';
 import { describe, it, expect, beforeEach } from 'vitest';
-import { storeRide, validateUploadBody, UploadValidationError } from '../../src/lib/upload-store';
+import {
+  storeRide,
+  deleteRide,
+  validateUploadBody,
+  UploadValidationError,
+} from '../../src/lib/upload-store';
 import { deriveRide } from '../../src/lib/derive';
 import { loadIndex, loadRide } from '../../src/lib/db';
 import { lineGpx } from '../gpx-fixtures';
@@ -154,6 +159,45 @@ describe('storeRide — records self-heal from summaries', () => {
     await env.DB.prepare('DELETE FROM rides WHERE id = ?').bind(fast.payload.id).run();
     index = await loadIndex(env.DB);
     expect(index.records.fastest20k?.rideId).toBe(slow.payload.id);
+  });
+});
+
+describe('deleteRide — removes rows + R2 object, records self-heal', () => {
+  it('deletes the D1 rows and the R2 object, and reports missing ids', async () => {
+    const b = body(bigRide('Doomed Loop'));
+    const { id } = await storeRide(env, b);
+    expect(await loadRide(env.DB, id)).not.toBeNull();
+    expect(await env.GPX_BUCKET.get(`${id}.gpx`)).not.toBeNull();
+
+    expect(await deleteRide(env, id)).toBe(true);
+
+    // Ride row, its explicitly-deleted track row, and R2 object all gone.
+    expect(await loadRide(env.DB, id)).toBeNull();
+    const track = await env.DB.prepare('SELECT ride_id FROM ride_tracks WHERE ride_id = ?')
+      .bind(id)
+      .first();
+    expect(track).toBeNull();
+    expect(await env.GPX_BUCKET.get(`${id}.gpx`)).toBeNull();
+    expect((await loadIndex(env.DB)).rides).toHaveLength(0);
+
+    // Deleting an unknown id is a no-op false (→ 404 at the endpoint).
+    expect(await deleteRide(env, id)).toBe(false);
+  });
+
+  it('heals records back to the surviving ride after a delete (recompute, not increment)', async () => {
+    const slow = body(bigRide('Slow Loop'));
+    await storeRide(env, slow);
+    const fast = body(bigRide('Fast Loop', { startS: 100000 }));
+    fast.payload.stats.maxSpeed = slow.payload.stats.maxSpeed * 2;
+    const { id: fastId } = await storeRide(env, fast);
+
+    expect((await loadIndex(env.DB)).records.maxSpeed?.rideId).toBe(fastId);
+
+    expect(await deleteRide(env, fastId)).toBe(true);
+
+    const index = await loadIndex(env.DB);
+    expect(index.rides).toHaveLength(1);
+    expect(index.records.maxSpeed?.rideId).toBe(slow.payload.id);
   });
 });
 

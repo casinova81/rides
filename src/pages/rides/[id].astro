@@ -1,0 +1,165 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { loadRide } from '../../lib/db';
+import {
+  detailSubline,
+  headlineTiles,
+  secondaryStats,
+  fastestWindows,
+  splitRows,
+} from '../../lib/ride-detail';
+import { trackHeroSVG } from '../../lib/thumb';
+
+// The ride detail shell (ticket 4a): full stats for one ride, plus delete.
+// Reads the per-ride payload from D1 per request (dynamic — a freshly-uploaded
+// ride is viewable with no rebuild). The map hero is a static route-line
+// placeholder until ticket 4b makes it live. Delete hits the Worker endpoint
+// and lets records/totals self-heal on the next index read.
+export const prerender = false;
+
+const { id } = Astro.params;
+const db = Astro.locals.runtime.env.DB;
+const ride = id ? await loadRide(db, id) : null;
+
+if (!ride) {
+  Astro.response.status = 404;
+}
+
+const heroSvg = ride ? trackHeroSVG(ride.track.lat, ride.track.lon) : '';
+const tiles = ride ? headlineTiles(ride) : [];
+const secondary = ride ? secondaryStats(ride) : [];
+const windows = ride ? fastestWindows(ride) : [];
+const splits = ride ? splitRows(ride.splits) : [];
+---
+
+<Layout title={ride ? `${ride.name} — Ride Tracker` : 'Ride not found'}>
+  <main class="wrap">
+    {
+      !ride ? (
+        <section class="not-found">
+          <h1>Ride not found</h1>
+          <p class="sub">
+            No ride with that id. <a href="/">Back to all rides</a>.
+          </p>
+        </section>
+      ) : (
+        <>
+          <header class="detail-head">
+            <h1>{ride.name}</h1>
+            <p class="sub detail-sub">{detailSubline(ride)}</p>
+          </header>
+
+          <div class="hero" set:html={heroSvg} />
+
+          <div class="tiles detail-tiles">
+            {tiles.map((t) => (
+              <div class="card tile">
+                <div class="v">{t.value}</div>
+                <div class="l">{t.label}</div>
+              </div>
+            ))}
+          </div>
+
+          <details class="more detail-more">
+            <summary>More stats & splits</summary>
+
+            <div class="disclosure-grid">
+              <section class="disclosure-block">
+                <h2>Details</h2>
+                <dl class="statlist">
+                  {secondary.map((s) => (
+                    <>
+                      <dt>{s.label}</dt>
+                      <dd>{s.value}</dd>
+                    </>
+                  ))}
+                </dl>
+              </section>
+
+              <section class="disclosure-block">
+                <h2>Fastest windows</h2>
+                <dl class="statlist">
+                  {windows.map((w) => (
+                    <>
+                      <dt>{w.label}</dt>
+                      <dd>{w.value}</dd>
+                    </>
+                  ))}
+                </dl>
+              </section>
+            </div>
+
+            <section class="disclosure-block">
+              <h2>Splits</h2>
+              <table class="splits">
+                <thead>
+                  <tr>
+                    <th>Km</th>
+                    <th>Distance</th>
+                    <th>Time</th>
+                    <th>Speed</th>
+                    <th>Elev</th>
+                    <th>Gradient</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {splits.map((s) => (
+                    <tr>
+                      <td>{s.km}</td>
+                      <td>{s.dist}</td>
+                      <td>{s.time}</td>
+                      <td>{s.speed}</td>
+                      <td>{s.ele}</td>
+                      <td>{s.grad}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          </details>
+
+          <div class="detail-actions">
+            <button id="delete-btn" class="btn danger" type="button" data-id={ride.id}>
+              Delete ride
+            </button>
+            <span id="delete-status" class="delete-status" aria-live="polite" />
+          </div>
+        </>
+      )
+    }
+  </main>
+</Layout>
+
+<script>
+  // Delete behind a confirmation → the Worker delete endpoint. On success the
+  // ride is gone from D1/R2 and records self-heal, so we return to the library.
+  const btn = document.getElementById('delete-btn') as HTMLButtonElement | null;
+  const status = document.getElementById('delete-status');
+  if (btn) {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.id;
+      if (!id) return;
+      if (!confirm('Delete this ride? This cannot be undone.')) return;
+
+      btn.disabled = true;
+      if (status) status.textContent = 'Deleting…';
+      try {
+        const res = await fetch(`/api/rides/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        if (!res.ok) {
+          let reason = `server responded ${res.status}`;
+          try {
+            const body = (await res.json()) as { error?: string };
+            if (body?.error) reason = body.error;
+          } catch {
+            /* non-JSON error body — keep the status line */
+          }
+          throw new Error(reason);
+        }
+        window.location.href = '/';
+      } catch (err) {
+        btn.disabled = false;
+        if (status) status.textContent = err instanceof Error ? err.message : String(err);
+      }
+    });
+  }
+</script>

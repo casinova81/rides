@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { polylineThumb } from './thumb';
+import { polylineThumb, trackHeroSVG } from './thumb';
 import { encodePolyline } from './polyline';
 
 // The card route thumbnail (issue 04): a bare SVG path drawn from the stored
@@ -44,5 +44,30 @@ describe('polylineThumb', () => {
     const svg = polylineThumb('', 120, 80);
     expect(svg).toContain('<svg');
     expect(svg).not.toContain('NaN');
+  });
+});
+
+describe('trackHeroSVG', () => {
+  it('draws the full-resolution track line into a fitted, y-flipped hero box', () => {
+    const lat = [52.5, 52.51, 52.52];
+    const lon = [13.4, 13.41, 13.42];
+    const svg = trackHeroSVG(lat, lon, 960, 360);
+    expect(svg).toContain('<svg');
+    expect(svg).toContain('viewBox="0 0 960 360"');
+    const path = /<path d="([^"]+)"/.exec(svg)?.[1];
+    expect(path).toBeTruthy();
+    expect(path!.startsWith('M')).toBe(true);
+    const coords = path!.match(/-?\d+(\.\d+)?/g)!.map(Number);
+    for (const c of coords) expect(Number.isFinite(c)).toBe(true);
+    // North is up: first (southernmost) point sits below the last.
+    const ys = coords.filter((_, i) => i % 2 === 1);
+    expect(ys[0]).toBeGreaterThan(ys[ys.length - 1]);
+  });
+
+  it('degrades gracefully on a too-short track', () => {
+    const svg = trackHeroSVG([52.5], [13.4], 960, 360);
+    expect(svg).toContain('<svg');
+    expect(svg).not.toContain('NaN');
+    expect(svg).not.toContain('<path');
   });
 });

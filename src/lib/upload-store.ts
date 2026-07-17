@@ -204,3 +204,25 @@ export async function storeRide(env: StoreEnv, body: UploadBody): Promise<Upload
 
   return { outcome, id: finalId, overwrote, heldRecords, brokenRecords };
 }
+
+/**
+ * Delete one ride by id (ticket 4a). Removes the D1 rows (rides + its track row)
+ * and the raw GPX object from R2. Records and totals are never stored, so they
+ * heal on the next index read with nothing else to do here. Returns false when
+ * no such ride exists (the endpoint maps that to a 404). D1 rows go first so a
+ * failed R2 delete can only ever strand an orphan object, never leave a row
+ * pointing at a missing GPX.
+ */
+export async function deleteRide(env: StoreEnv, id: string): Promise<boolean> {
+  const row = await env.DB.prepare('SELECT gpx_key FROM rides WHERE id = ?')
+    .bind(id)
+    .first<{ gpx_key: string }>();
+  if (!row) return false;
+
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM ride_tracks WHERE ride_id = ?').bind(id),
+    env.DB.prepare('DELETE FROM rides WHERE id = ?').bind(id),
+  ]);
+  await env.GPX_BUCKET.delete(row.gpx_key);
+  return true;
+}

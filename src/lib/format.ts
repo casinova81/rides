@@ -49,3 +49,35 @@ const dateFmt = new Intl.DateTimeFormat(LOCALE, {
 export function fmtDate(iso: string): string {
   return dateFmt.format(new Date(iso));
 }
+
+const timeFmt = new Intl.DateTimeFormat(LOCALE, {
+  timeZone: TIME_ZONE,
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+});
+
+/** A UTC ISO instant as its 24-h Berlin wall-clock time, e.g. `12:00`. */
+export function fmtTime(iso: string): string {
+  return timeFmt.format(new Date(iso));
+}
+
+/** A gradient percentage with one comma decimal, e.g. `7,2 %` / `-4,2 %`. */
+export function fmtGradient(pct: number): string {
+  return `${oneDp.format(pct)} %`;
+}
+
+/** A signed elevation delta in whole metres, e.g. `+12 m` / `-8 m` / `0 m`. */
+export function fmtEleDelta(meters: number): string {
+  const r = Math.round(meters) || 0; // `|| 0` folds a rounded -0 back to 0 → "0 m", not "-0 m"
+  return `${r > 0 ? '+' : ''}${whole.format(r)} m`;
+}
+
+/** Prettify a raw Komoot sport code (`e_bike`) into an English label (`E Bike`). */
+export function fmtSport(sport: string): string {
+  return sport
+    .split(/[_\s]+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
