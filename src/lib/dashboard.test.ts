@@ -11,6 +11,7 @@ import {
   recordCards,
   recordHolderIds,
   ridesForYear,
+  sortRides,
   RECORD_LABELS,
 } from './dashboard';
 
@@ -90,6 +91,29 @@ describe('ridesForYear', () => {
 
   it('returns every ride for the "all" filter', () => {
     expect(ridesForYear(rides, 'all').map((r) => r.id)).toEqual(['new', 'old']);
+  });
+});
+
+describe('sortRides', () => {
+  // Deliberately out of order on both axes so each key has real work to do.
+  const rides = [
+    ride('mid', '2026-03-01T09:00:00Z', { distance: 30000 }),
+    ride('old-long', '2025-05-01T09:00:00Z', { distance: 80000 }),
+    ride('new-short', '2026-06-01T09:00:00Z', { distance: 5000 }),
+  ];
+
+  it('"recent" orders by start descending (the SQL default)', () => {
+    expect(sortRides(rides, 'recent').map((r) => r.id)).toEqual(['new-short', 'mid', 'old-long']);
+  });
+
+  it('"distance" orders longest ride first', () => {
+    expect(sortRides(rides, 'distance').map((r) => r.id)).toEqual(['old-long', 'mid', 'new-short']);
+  });
+
+  it('does not mutate the input array', () => {
+    const before = rides.map((r) => r.id);
+    sortRides(rides, 'distance');
+    expect(rides.map((r) => r.id)).toEqual(before);
   });
 });
 

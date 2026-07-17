@@ -126,9 +126,33 @@ describe('PlaybackCore — pose smoothing', () => {
     pb.setSpeed(10);
     pb.play();
     const pose = pb.frame(1.0); // clock jumps to 10 s → raw ~50 m in
+    const rawDist = track.sampleByTime(pb.time).dist;
     const smoothedFromStart = haversine(start, { lat: pose.lngLat[1], lon: pose.lngLat[0] });
     expect(smoothedFromStart).toBeGreaterThan(0); // it moved
-    expect(smoothedFromStart).toBeLessThan(pose.distance); // …but lags the raw distance
+    expect(pose.distance).toBeLessThan(rawDist); // …but lags the clock's raw distance
+    expect(smoothedFromStart).toBeCloseTo(pose.distance, 3); // and sits at its own distance
+  });
+
+  it('keeps the pose exactly on the track polyline while smoothing (never cuts corners)', () => {
+    // A hard 90° corner: lon/lat smoothing would pull the pose inside the bend;
+    // arc-length smoothing must keep every frame's position on the line itself.
+    const track = buildTrack([
+      { bearing: 90, length: 400 },
+      { bearing: 0, length: 400 },
+    ]);
+    const pb = new PlaybackCore(track);
+    pb.setSpeed(50);
+    pb.play();
+    for (let i = 0; i < 120 && pb.playing; i++) {
+      const pose = pb.frame(0.05);
+      const onLine = track.sampleByDist(pose.distance);
+      expect(pose.lngLat[0]).toBeCloseTo(onLine.lon, 12);
+      expect(pose.lngLat[1]).toBeCloseTo(onLine.lat, 12);
+      // …and that distance really is a point of the polyline, metres from the
+      // straight-line chord a corner-cutting smoother would take.
+      const nearest = track.nearestByPoint(pose.lngLat[0], pose.lngLat[1]);
+      expect(Math.sqrt(nearest.d2)).toBeLessThan(1e-9); // planar degrees² → ~0
+    }
   });
 
   it('converges to the raw position when the clock is held still', () => {

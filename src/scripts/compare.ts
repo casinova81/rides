@@ -14,8 +14,8 @@ import type { Track as TrackData } from '../lib/types';
 // diverge only when the shorter ride reaches its end (its core auto-pauses there
 // while the longer keeps going). The controller — not core.play() — owns restart,
 // so a mid-race pause/resume never desyncs a ride that had already finished.
-// Cursors are keyed by distance: hovering a chart or the map moves both rides to
-// the same km; the race moves each ride to its own distance at the shared time.
+// Cursors are keyed by distance: clicking a chart or a track line moves both rides
+// to the same km; the race moves each ride to its own distance at the shared time.
 
 interface RideData {
   name: string;
@@ -54,7 +54,7 @@ export async function mountCompare(): Promise<void> {
   const master = cores[0].duration >= cores[1].duration ? cores[0] : cores[1];
 
   // Charts mount synchronously and stay live even if the map bundle fails to load.
-  const charts = mountCompareCharts(tracks, (dist) => hoverAt(dist));
+  const charts = mountCompareCharts(tracks, (dist) => inspectAt(dist));
   let map: CompareMap | null = null;
 
   bar.hidden = false;
@@ -140,10 +140,10 @@ export async function mountCompare(): Promise<void> {
   };
 
   /**
-   * Hover inspection: move both rides to the same km. Ignored while the race runs —
-   * the rAF loop owns the cursors then, so hover only bites when paused/idle.
+   * Click inspection: move both rides to the same km. Ignored while the race runs —
+   * the rAF loop owns the cursors then, so a click only bites when paused/idle.
    */
-  const hoverAt = (dist: number) => {
+  const inspectAt = (dist: number) => {
     if (anyPlaying()) return;
     renderCursors([dist, dist]);
   };
@@ -186,9 +186,7 @@ export async function mountCompare(): Promise<void> {
   // Prime the clock, cursors, and leader at the start; the map builds in the
   // background (its fitted overview stays until then) and snaps its markers on load.
   renderOnce();
-  void mountCompareMap(container, tracks, colors, (dist) => {
-    if (dist !== null) hoverAt(dist);
-  })
+  void mountCompareMap(container, tracks, colors, (dist) => inspectAt(dist))
     .then((m) => {
       map = m;
       renderOnce();

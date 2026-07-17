@@ -12,6 +12,24 @@ import { rideCardHTML } from './ride-card';
 /** A calendar year, or "all" for the library's un-scoped view. */
 export type YearFilter = number | 'all';
 
+/** Library sort orders: most recent first (default) or longest distance first. */
+export type SortKey = 'recent' | 'distance';
+
+/**
+ * Rides ordered by the sort key, non-mutating. `recent` replicates the index's
+ * SQL default (`ORDER BY start DESC`) so client re-renders never drift from the
+ * server's order; `distance` is longest ride first.
+ */
+export function sortRides(rides: IndexSummary[], sort: SortKey): IndexSummary[] {
+  const sorted = [...rides];
+  if (sort === 'distance') {
+    sorted.sort((a, b) => b.stats.distance - a.stats.distance);
+  } else {
+    sorted.sort((a, b) => (a.start < b.start ? 1 : a.start > b.start ? -1 : 0));
+  }
+  return sorted;
+}
+
 export interface AllTimeTotals {
   distance: number; // m
   count: number;
@@ -58,12 +76,17 @@ export function ridesForYear(rides: IndexSummary[], year: YearFilter): IndexSumm
 }
 
 /**
- * The year-scoped library as an HTML string — newest-first ride cards with a
- * trophy on record holders, or an empty note. Shared verbatim by the server
- * render and the client re-scope so the two never drift.
+ * The year-scoped, sorted library as an HTML string — ride cards with a trophy
+ * on record holders, or an empty note. Shared verbatim by the server render and
+ * the client re-scope so the two never drift.
  */
-export function libraryHTML(rides: IndexSummary[], year: YearFilter, holders: Set<string>): string {
-  const scoped = ridesForYear(rides, year);
+export function libraryHTML(
+  rides: IndexSummary[],
+  year: YearFilter,
+  holders: Set<string>,
+  sort: SortKey = 'recent',
+): string {
+  const scoped = sortRides(ridesForYear(rides, year), sort);
   if (scoped.length === 0) return '<p class="sub empty-note">No rides for this year.</p>';
   return scoped.map((s) => rideCardHTML(s, { holdsRecord: holders.has(s.id) })).join('');
 }

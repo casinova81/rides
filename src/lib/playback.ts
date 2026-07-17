@@ -7,6 +7,13 @@ import type { RidePose } from './types';
 // adapter consumes the pose and places the camera exactly, so smoothing is locked
 // ride-feel, not engine-feel. `updateFrame` is absolute across the seam — the
 // core resets its smoothing on seek so the pose itself jumps cleanly.
+//
+// Position smoothing runs in arc-length space (a distance along the track, not
+// lon/lat): the smoothed distance relaxes toward the clock's raw distance, and the
+// pose is the track sampled *at* that distance. So the pose is always exactly on
+// the polyline — the marker rides the line and never cuts corners — while speed
+// transients (seeks, speed-step changes, GPS timing jitter) are still filtered
+// by τ, which is what keeps the camera motion smooth.
 
 const D2R = Math.PI / 180;
 const R2D = 180 / Math.PI;
@@ -21,11 +28,6 @@ export interface PlaybackOptions {
   bearingTau?: number;
   /** Look-ahead along the track for the heading, metres (issue 07 default 25). */
   lookahead?: number;
-}
-
-interface LonLat {
-  lon: number;
-  lat: number;
 }
 
 interface Vec {
@@ -44,8 +46,7 @@ export class PlaybackCore {
   private _playing = false;
 
   // Smoothing state; null means "reset — snap on the next frame" (issue 09 seek).
-  private smooth: LonLat | null = null;
-  private smoothEle = 0;
+  private smoothDist: number | null = null;
   private bearVec: Vec | null = null;
 
   constructor(track: Track, opts: PlaybackOptions = {}) {
@@ -98,7 +99,7 @@ export class PlaybackCore {
   /** Jump the clock to `t` seconds (clamped) and reset smoothing so the pose jumps cleanly. */
   seek(t: number): void {
     this.vt = Math.max(0, Math.min(this.duration, t));
-    this.smooth = null;
+    this.smoothDist = null;
     this.bearVec = null;
   }
 
@@ -118,20 +119,20 @@ export class PlaybackCore {
 
     const raw = this.track.sampleByTime(this.vt);
 
-    // Position: exponential relaxation toward the raw sample (τ = positionTau).
+    // Position: exponential relaxation of the distance along the track toward the
+    // clock's raw distance (τ = positionTau), then sample the track *at* the
+    // smoothed distance — the pose stays exactly on the polyline.
     const k = this.positionTau > 0 ? 1 - Math.exp(-dt / this.positionTau) : 1;
-    if (this.smooth === null) {
-      this.smooth = { lon: raw.lon, lat: raw.lat };
-      this.smoothEle = raw.ele;
+    if (this.smoothDist === null) {
+      this.smoothDist = raw.dist;
     } else {
-      this.smooth.lon += (raw.lon - this.smooth.lon) * k;
-      this.smooth.lat += (raw.lat - this.smooth.lat) * k;
-      this.smoothEle += (raw.ele - this.smoothEle) * k;
+      this.smoothDist += (raw.dist - this.smoothDist) * k;
     }
+    const s = this.track.sampleByDist(this.smoothDist);
 
     // Bearing: circular (vector) smoothing of a look-ahead heading — averaging the
     // direction vectors, so 350°→10° relaxes through north, not through the south.
-    const rawBear = this.track.bearingAt(raw.dist, this.lookahead);
+    const rawBear = this.track.bearingAt(this.smoothDist, this.lookahead);
     const bk = this.bearingTau > 0 ? 1 - Math.exp(-dt / this.bearingTau) : 1;
     const target: Vec = { x: Math.sin(rawBear * D2R), y: Math.cos(rawBear * D2R) };
     if (this.bearVec === null) {
@@ -143,10 +144,10 @@ export class PlaybackCore {
     const bearing = (Math.atan2(this.bearVec.x, this.bearVec.y) * R2D + 360) % 360;
 
     return {
-      lngLat: [this.smooth.lon, this.smooth.lat],
-      elevation: this.smoothEle,
+      lngLat: [s.lon, s.lat],
+      elevation: s.ele,
       bearing,
-      distance: raw.dist,
+      distance: this.smoothDist,
       time: this.vt,
     };
   }

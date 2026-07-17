@@ -3,12 +3,13 @@ import { fmtElevation, fmtSpeedKmh } from '../lib/format';
 import type { Track } from '../lib/track';
 
 // The compare charts' client half (ticket 6). The static SVGs are server-rendered
-// from the same pure geometry (chart.ts); here we re-derive it to (a) map a hover
+// from the same pure geometry (chart.ts); here we re-derive it to (a) map a click
 // clientX back to a shared track distance and (b) place each ride's cursor line +
 // readout. Each chart carries one cursor per ride: they diverge during the ghost
-// race (each at its own distance) and coincide on hover (both at the hovered km).
+// race (each at its own distance) and coincide on a click (both at the clicked km).
 // A cursor stops at its ride's own end, so a shorter ride's marker pins at its
-// finish rather than running off the shared axis.
+// finish rather than running off the shared axis. Click-only by design — moving
+// the pointer across a chart must never scrub the shared cursor.
 
 interface CompareChartHandle {
   kind: ChartKind;
@@ -25,9 +26,9 @@ export interface CompareCharts {
 }
 
 /**
- * Wire the stacked compare charts. `onScrub(distance)` fires as the pointer moves
- * over a chart — the controller turns that into a shared-km cursor on both rides.
- * Returns a no-op-safe handle when the charts aren't on the page.
+ * Wire the stacked compare charts. `onScrub(distance)` fires when the pointer
+ * presses on a chart (click or tap) — the controller turns that into a shared-km
+ * cursor on both rides. Returns a no-op-safe handle when the charts aren't on the page.
  */
 export function mountCompareCharts(tracks: Track[], onScrub: (dist: number) => void): CompareCharts {
   const root = document.getElementById('compare-charts');
@@ -59,12 +60,10 @@ export function mountCompareCharts(tracks: Track[], onScrub: (dist: number) => v
       if (rect.width === 0) return 0;
       return geom.distForX(((clientX - rect.left) / rect.width) * geom.width);
     };
-    const onMove = (e: PointerEvent) => onScrub(toDist(e.clientX));
-    svg.addEventListener('pointermove', onMove);
-    svg.addEventListener('pointerdown', onMove);
+    const onPress = (e: PointerEvent) => onScrub(toDist(e.clientX));
+    svg.addEventListener('pointerdown', onPress);
     cleanups.push(() => {
-      svg.removeEventListener('pointermove', onMove);
-      svg.removeEventListener('pointerdown', onMove);
+      svg.removeEventListener('pointerdown', onPress);
     });
   });
 

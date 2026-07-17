@@ -46,17 +46,15 @@ export async function mountRidePlayback(): Promise<void> {
 
   // The map-cursor → shared-cursor channel (ticket 4d). Late-bound: the map is built
   // in the background, but it only ever fires this at runtime, by when `onCursor`
-  // points at the real seek. Hovering the map seeks playback, which moves the charts
-  // too — closing the chart↔map↔playback loop.
+  // points at the real seek. Clicking the track line seeks playback, which moves the
+  // charts too — closing the chart↔map↔playback loop.
   let onCursor: (dist: number) => void = () => {};
 
   /** Build (or rebuild) the live view for `modeId`, replacing any current one. */
   const buildView = async (modeId: string): Promise<void> => {
     const choice = choices.find((c) => c.mode.id === modeId) ?? choices[0];
     const next = await choice.view.create(container, track, {
-      onHover: (dist) => {
-        if (dist !== null) onCursor(dist);
-      },
+      onSeek: (dist) => onCursor(dist),
     });
     next.setMode(choice.mode.id);
     view = next;
@@ -76,7 +74,7 @@ export async function mountRidePlayback(): Promise<void> {
   let swapping = false;
 
   // The charts are the third sync surface (ticket 4d), mounted independently of the
-  // map: they stay live while the map bundle loads (and even if it fails). Hovering
+  // map: they stay live while the map bundle loads (and even if it fails). Clicking
   // one calls back with a distance; we seek playback there so the map marker + clock
   // + both chart cursors all land on the same point. The controller owns no cursor
   // state beyond the playback clock — that is the single shared cursor.

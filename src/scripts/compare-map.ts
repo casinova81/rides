@@ -5,7 +5,7 @@ import { Track } from '../lib/track';
 // 2D basemap in their identity colours, each with a moving marker. Unlike the
 // ride-detail hero this is *not* a follow camera — the view stays fitted to both
 // tracks while the two markers move along them (driven by the ghost race, or
-// snapped to a hovered km). maplibre-gl is imported dynamically so the bundle only
+// snapped to a clicked km). maplibre-gl is imported dynamically so the bundle only
 // loads on this page (matching the ride-detail adapter's lazy-load invariant).
 
 const STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
@@ -27,17 +27,22 @@ function markerEl(color: string): HTMLDivElement {
   return el;
 }
 
+// A click seeks the shared cursor only when it lands within this many screen
+// pixels of a track line — clicking empty map must not jump the cursor. Matches
+// the ride-detail adapter's SEEK_CLICK_RADIUS_PX.
+const SEEK_CLICK_RADIUS_PX = 25;
+
 /**
- * Mount the overlay map. `onHover` fires the cumulative distance of the nearest
- * point across *either* track as the pointer moves (and `null` on leave), so the
- * controller can drive the shared km cursor. A drag-pan also emits mousemove, so
- * it's gated behind a drag flag — repositioning the map must not scrub the cursor.
+ * Mount the overlay map. `onSeek` fires the cumulative distance of the nearest
+ * point across *either* track when the user clicks on (or near) a line, so the
+ * controller can drive the shared km cursor. Click-only by design — hovering
+ * never scrubs, and MapLibre suppresses `click` after a drag-pan.
  */
 export async function mountCompareMap(
   container: HTMLElement,
   tracks: Track[],
   colors: string[],
-  onHover: (dist: number | null) => void,
+  onSeek: (dist: number) => void,
 ): Promise<CompareMap> {
   const maplibregl = (await import('maplibre-gl')).default;
 
@@ -64,22 +69,26 @@ export async function mountCompareMap(
   const ro = new ResizeObserver(() => map.resize());
   ro.observe(container);
 
-  // Hover → the nearest point across both tracks → shared cursor distance. The
+  // Click → the nearest point across both tracks → shared cursor distance. The
   // query point is the same for both, so d2 (planar squared distance) is directly
   // comparable and picks the closer ride; its cumulative distance is the shared km.
-  let dragging = false;
-  map.on('dragstart', () => (dragging = true));
-  map.on('dragend', () => (dragging = false));
-  map.on('mousemove', (e) => {
-    if (dragging) return;
+  // Only clicks landing near a line seek — empty-map clicks are ignored.
+  map.on('click', (e) => {
     let nearest = tracks[0].nearestByPoint(e.lngLat.lng, e.lngLat.lat);
+    let nearestTrack = tracks[0];
     for (let i = 1; i < tracks.length; i++) {
       const cand = tracks[i].nearestByPoint(e.lngLat.lng, e.lngLat.lat);
-      if (cand.d2 < nearest.d2) nearest = cand;
+      if (cand.d2 < nearest.d2) {
+        nearest = cand;
+        nearestTrack = tracks[i];
+      }
     }
-    onHover(nearest.dist);
+    const s = nearestTrack.sampleByDist(nearest.dist);
+    const px = map.project([s.lon, s.lat]);
+    if (Math.hypot(px.x - e.point.x, px.y - e.point.y) <= SEEK_CLICK_RADIUS_PX) {
+      onSeek(nearest.dist);
+    }
   });
-  map.on('mouseout', () => onHover(null));
 
   await new Promise<void>((resolve) => {
     map.on('load', () => {

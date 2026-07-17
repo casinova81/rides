@@ -46,64 +46,70 @@ const speedChart = ride ? chartSVG(new Track(ride.track), 'speed') : '';
 ---
 
 <Layout title={ride ? `${ride.name} — Ride Tracker` : 'Ride not found'}>
-  <main class="wrap">
+  <main>
     {
       !ride ? (
-        <section class="not-found">
-          <h1>Ride not found</h1>
-          <p class="sub">
-            No ride with that id. <a href="/">Back to all rides</a>.
-          </p>
-        </section>
+        <div class="wrap">
+          <section class="not-found">
+            <h1>Ride not found</h1>
+            <p class="sub">
+              No ride with that id. <a href="/">Back to all rides</a>.
+            </p>
+          </section>
+        </div>
       ) : (
         <>
-          <header class="detail-head">
-            <h1>{ride.name}</h1>
-            <p class="sub detail-sub">{detailSubline(ride)}</p>
-          </header>
+          <div class="wrap wrap--top">
+            <header class="detail-head">
+              <h1>{ride.name}</h1>
+              <p class="sub detail-sub">{detailSubline(ride)}</p>
+            </header>
+          </div>
 
-          <div class="hero" id="ride-hero">
+          <div class="hero hero--bleed" id="ride-hero">
             <div class="hero__placeholder" set:html={heroSvg} />
             <div class="hero__map" id="map-hero" role="application" aria-label="Ride playback map" />
-            <div class="playback" id="playback" hidden>
-              <button class="pb-btn" id="pb-play" type="button" aria-label="Play">▶</button>
-              <div class="pb-speeds" id="pb-speeds" role="group" aria-label="Playback speed">
-                {
-                  SPEED_STEPS.map((s, i) => (
-                    <button
-                      class={`pb-speed${i === 1 ? ' active' : ''}`}
-                      type="button"
-                      data-speed={s}
-                    >
-                      {s}×
-                    </button>
-                  ))
-                }
-              </div>
-              <div class="pb-modes" id="pb-modes" role="group" aria-label="Camera mode">
-                {
-                  modes.map((c, i) => (
-                    <button
-                      class={`pb-mode${i === 0 ? ' active' : ''}`}
-                      type="button"
-                      data-mode={c.mode.id}
-                    >
-                      {c.mode.label}
-                    </button>
-                  ))
-                }
-              </div>
-              <input
-                class="pb-scrub"
-                id="pb-scrub"
-                type="range"
-                min="0"
-                max="1000"
-                value="0"
-                aria-label="Seek through the ride"
-              />
-              <span class="pb-time" id="pb-time" aria-live="off">0:00</span>
+          </div>
+
+          <div class="wrap wrap--bottom">
+          <div class="playback" id="playback" hidden>
+            <button class="pb-btn" id="pb-play" type="button" aria-label="Play">▶</button>
+            <div class="pb-speeds" id="pb-speeds" role="group" aria-label="Playback speed">
+              {
+                SPEED_STEPS.map((s, i) => (
+                  <button
+                    class={`pb-speed${i === 1 ? ' active' : ''}`}
+                    type="button"
+                    data-speed={s}
+                  >
+                    {s}×
+                  </button>
+                ))
+              }
             </div>
+            <div class="pb-modes" id="pb-modes" role="group" aria-label="Camera mode">
+              {
+                modes.map((c, i) => (
+                  <button
+                    class={`pb-mode${i === 0 ? ' active' : ''}`}
+                    type="button"
+                    data-mode={c.mode.id}
+                  >
+                    {c.mode.label}
+                  </button>
+                ))
+              }
+            </div>
+            <input
+              class="pb-scrub"
+              id="pb-scrub"
+              type="range"
+              min="0"
+              max="1000"
+              value="0"
+              aria-label="Seek through the ride"
+            />
+            <span class="pb-time" id="pb-time" aria-live="off">0:00</span>
           </div>
           <script type="application/json" id="ride-track" is:inline set:html={JSON.stringify(ride.track)} />
 
@@ -198,6 +204,7 @@ const speedChart = ride ? chartSVG(new Track(ride.track), 'speed') : '';
               Delete ride
             </button>
             <span id="delete-status" class="delete-status" aria-live="polite" />
+          </div>
           </div>
         </>
       )

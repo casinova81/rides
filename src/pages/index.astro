@@ -104,7 +104,16 @@ const indexData = JSON.stringify({ rides, holders: [...holders] }).replace(/</g,
     </section>
 
     <section class="dash-section">
-      <h2>Rides</h2>
+      <div class="section-head">
+        <h2>Rides</h2>
+        <label class="year-select"
+          >Sort
+          <select id="sort-select">
+            <option value="recent" selected>Most recent</option>
+            <option value="distance">Distance</option>
+          </select>
+        </label>
+      </div>
       {
         rides.length === 0 && (
           <p class="sub empty-note">
@@ -121,31 +130,35 @@ const indexData = JSON.stringify({ rides, holders: [...holders] }).replace(/</g,
 
 <script>
   import { libraryHTML, monthlyDistance, monthlyChartSVG } from '../lib/dashboard';
-  import type { YearFilter } from '../lib/dashboard';
+  import type { YearFilter, SortKey } from '../lib/dashboard';
   import type { IndexSummary } from '../lib/types';
 
-  // Re-scope the chart and library client-side when the year changes — the tiles
-  // and records grid stay all-time and are left untouched. Same pure functions
-  // the server used, driven by the embedded index so there's no round-trip.
+  // Re-scope the chart and library client-side when the year or sort changes —
+  // the tiles and records grid stay all-time and are left untouched. Same pure
+  // functions the server used, driven by the embedded index so there's no
+  // round-trip. The year scopes chart + library; the sort scopes the library only.
   const dataEl = document.getElementById('index-data');
-  const select = document.getElementById('year-select') as HTMLSelectElement | null;
+  const yearSelect = document.getElementById('year-select') as HTMLSelectElement | null;
+  const sortSelect = document.getElementById('sort-select') as HTMLSelectElement | null;
   const chart = document.getElementById('chart');
   const library = document.getElementById('library');
-  if (dataEl && select && chart && library) {
+  if (dataEl && yearSelect && sortSelect && chart && library) {
     const data = JSON.parse(dataEl.textContent ?? '{}') as {
       rides: IndexSummary[];
       holders: string[];
     };
     const holders = new Set(data.holders);
 
-    function render(year: YearFilter): void {
-      chart!.innerHTML = monthlyChartSVG(monthlyDistance(data.rides, year));
-      library!.innerHTML = libraryHTML(data.rides, year, holders);
+    const currentYear = (): YearFilter =>
+      yearSelect!.value === 'all' ? 'all' : Number(yearSelect!.value);
+    const currentSort = (): SortKey => (sortSelect!.value === 'distance' ? 'distance' : 'recent');
+
+    function render(): void {
+      chart!.innerHTML = monthlyChartSVG(monthlyDistance(data.rides, currentYear()));
+      library!.innerHTML = libraryHTML(data.rides, currentYear(), holders, currentSort());
     }
 
-    select.addEventListener('change', () => {
-      const v = select.value;
-      render(v === 'all' ? 'all' : Number(v));
-    });
+    yearSelect.addEventListener('change', render);
+    sortSelect.addEventListener('change', render);
   }
 </script>

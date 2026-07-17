@@ -27,6 +27,9 @@ const DEM_URL = 'https://tiles.mapterhorn.com/tilejson.json';
 const DEM_SOURCE = 'dem';
 const HILLSHADE_LAYER = 'hillshade';
 const TRACK_COLOR = '#e6413c'; // the ridden line on the map (matches the .ride-marker CSS)
+// A click seeks playback only when it lands within this many screen pixels of the
+// track line — clicking empty map (to focus/pan) must not jump the cursor.
+const SEEK_CLICK_RADIUS_PX = 25;
 
 const MODES: ReadonlyArray<MapMode> = [
   { id: FOLLOW_2D, label: '2D follow' },
@@ -88,20 +91,22 @@ export const maplibreFactory: MapViewFactory = {
       map.on('rotatestart', fire);
     }
 
-    // The map-cursor channel (ticket 4d): report the track distance nearest the
-    // pointer so the map drives the charts + playback. Nearest-point math is pure
-    // (Track.nearestByPoint) — the adapter only converts screen → lng/lat here. A
-    // drag-pan also fires mousemove, so it's gated behind a drag flag: repositioning
-    // the camera must not scrub playback, only genuine hover does.
-    if (opts.onHover) {
-      const onHover = opts.onHover;
-      let dragging = false;
-      map.on('dragstart', () => (dragging = true));
-      map.on('dragend', () => (dragging = false));
-      map.on('mousemove', (e) => {
-        if (!dragging) onHover(track.nearestByPoint(e.lngLat.lng, e.lngLat.lat).dist);
+    // The map-cursor channel (ticket 4d): a click on (or near) the track line
+    // reports its distance so the map drives the charts + playback. Click-only —
+    // hovering must never scrub (and MapLibre suppresses `click` after a drag-pan,
+    // so repositioning the camera can't seek either). Nearest-point math is pure
+    // (Track.nearestByPoint); the adapter converts screen ↔ lng/lat and rejects
+    // clicks landing further than a small pixel radius from the line.
+    if (opts.onSeek) {
+      const onSeek = opts.onSeek;
+      map.on('click', (e) => {
+        const nearest = track.nearestByPoint(e.lngLat.lng, e.lngLat.lat);
+        const s = track.sampleByDist(nearest.dist);
+        const px = map.project([s.lon, s.lat]);
+        if (Math.hypot(px.x - e.point.x, px.y - e.point.y) <= SEEK_CLICK_RADIUS_PX) {
+          onSeek(nearest.dist);
+        }
       });
-      map.on('mouseout', () => onHover(null));
     }
 
     // A per-map ResizeObserver keeps the canvas sized to its container (map rule).
