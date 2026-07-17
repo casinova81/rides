@@ -178,6 +178,98 @@ details.more summary {
   color: var(--ink-1);
 }
 
+/* landing dashboard (issue 04 / ticket 3b) */
+.dash-section {
+  margin-top: 28px;
+}
+.dash-section > h2 {
+  font-size: 15px;
+  font-weight: 650;
+  margin: 0 0 10px;
+}
+.section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.section-head h2 {
+  font-size: 15px;
+  font-weight: 650;
+  margin: 0;
+}
+.year-select {
+  color: var(--ink-2);
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.year-select select {
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink-1);
+  background: var(--surface-1);
+  border: 1px solid var(--baseline);
+  border-radius: 8px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+.chart-card {
+  padding: 12px 12px 4px;
+}
+.month-chart {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.month-chart .bar {
+  fill: var(--ele);
+}
+.month-chart .bar-label {
+  fill: var(--muted);
+  font-size: 11px;
+}
+.month-chart .bar-base {
+  stroke: var(--grid);
+  stroke-width: 1;
+}
+.empty-note {
+  margin: 4px 0;
+}
+
+/* 8-record grid — each card links to its holder ride */
+.record-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+}
+.record {
+  padding: 10px 12px;
+  text-decoration: none;
+  color: inherit;
+  display: block;
+}
+a.record:hover {
+  border-color: var(--ink-2);
+}
+.record.empty {
+  opacity: 0.55;
+}
+.record-label {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.record-value {
+  font-size: 18px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  margin-top: 3px;
+}
+
 /* shared ride card (issue 04) — used by upload results and the dashboard/library */
 .ride-grid {
   display: grid;

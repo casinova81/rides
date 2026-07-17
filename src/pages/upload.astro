@@ -26,20 +26,10 @@ import Layout from '../layouts/Layout.astro';
 <script>
   import { deriveRide, summaryOf } from '../lib/derive';
   import { rideCardHTML } from '../lib/ride-card';
+  import { RECORD_LABELS } from '../lib/dashboard';
   import { escapeHtml } from '../lib/html';
   import type { UploadResult } from '../lib/upload-store';
   import type { RecordKey, IndexSummary } from '../lib/types';
-
-  const RECORD_LABELS: Record<RecordKey, string> = {
-    longestDistance: 'Longest distance',
-    mostElevationGain: 'Most elevation gain',
-    fastest5k: 'Fastest 5 km',
-    fastest10k: 'Fastest 10 km',
-    fastest20k: 'Fastest 20 km',
-    fastestAvgSpeed: 'Fastest avg speed',
-    maxSpeed: 'Top speed',
-    longestMovingTime: 'Longest moving time',
-  };
 
   const dropzone = document.getElementById('dropzone') as HTMLLabelElement;
   const input = document.getElementById('file-input') as HTMLInputElement;

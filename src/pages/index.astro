@@ -1,27 +1,151 @@
 ---
 import Layout from '../layouts/Layout.astro';
-import { countRides } from '../lib/db';
+import { loadIndex } from '../lib/db';
+import {
+  allTimeTotals,
+  availableYears,
+  libraryHTML,
+  monthlyDistance,
+  monthlyChartSVG,
+  recordCards,
+  recordHolderIds,
+  berlinYearMonth,
+} from '../lib/dashboard';
+import { fmtKm, fmtDuration } from '../lib/format';
 
-// Dynamic: read the DB binding per request so new rides appear with no rebuild
-// (issue 02). The full dashboard/library replaces this body in ticket 3b.
+// The combined landing dashboard + library (ticket 3b), rendered from the index
+// with no map tiles. All-time tiles and the records grid are always all-time;
+// the monthly chart and the card library scope to the shared year selector.
+// Dynamic: read D1 per request so a freshly-uploaded ride shows with no rebuild.
 export const prerender = false;
 
 const db = Astro.locals.runtime.env.DB;
-const rideCount = await countRides(db);
+const index = await loadIndex(db);
+const rides = index.rides; // newest first (db.ts orders by start DESC)
+
+const totals = allTimeTotals(rides);
+const holders = recordHolderIds(index.records);
+const records = recordCards(index.records);
+
+// Default to the current Berlin year; keep it selectable even with no rides yet.
+const currentYear = berlinYearMonth(new Date().toISOString()).year;
+const yearOptions = [...new Set([currentYear, ...availableYears(rides)])].sort((a, b) => b - a);
+const defaultYear = currentYear;
+
+// Initial (default-year) render of the two year-scoped sections. The client
+// re-renders these from the embedded index when the selector changes.
+const chartHtml = monthlyChartSVG(monthlyDistance(rides, defaultYear));
+const libraryHtml = libraryHTML(rides, defaultYear, holders);
+
+// The client needs the index rows (with polylines for thumbnails) and the holder
+// ids to re-render the chart and library without a round-trip. Escape `<` so a
+// ride name containing `</script` can't break out of the JSON data island.
+const indexData = JSON.stringify({ rides, holders: [...holders] }).replace(/</g, '\\u003c');
 ---
 
 <Layout title="Ride Tracker" nav="home">
   <main class="wrap">
     <h1>Ride Tracker</h1>
-    <p class="sub">Live from D1 — no rebuild needed.</p>
-    <div class="tiles" style="margin-top:16px">
+
+    <div class="tiles" style="margin-top:14px">
       <div class="card tile">
-        <div class="v">{rideCount}</div>
-        <div class="l">Rides stored</div>
+        <div class="v">{fmtKm(totals.distance)}</div>
+        <div class="l">Total distance</div>
+      </div>
+      <div class="card tile">
+        <div class="v">{totals.count}</div>
+        <div class="l">Rides</div>
+      </div>
+      <div class="card tile">
+        <div class="v">{fmtDuration(totals.movingTime)}</div>
+        <div class="l">Moving time</div>
       </div>
     </div>
-    <p style="margin-top:20px">
-      <a class="btn" href="/upload">Upload rides</a>
-    </p>
+
+    <section class="dash-section">
+      <div class="section-head">
+        <h2>Kilometres per month</h2>
+        <label class="year-select"
+          >Year
+          <select id="year-select">
+            {
+              yearOptions.map((y) => (
+                <option value={y} selected={y === defaultYear}>
+                  {y}
+                </option>
+              ))
+            }
+            <option value="all">All</option>
+          </select>
+        </label>
+      </div>
+      <div id="chart" class="card chart-card" set:html={chartHtml}></div>
+    </section>
+
+    <section class="dash-section">
+      <h2>Records</h2>
+      <div class="record-grid">
+        {
+          records.map((c) =>
+            c.rideId ? (
+              <a class="record card" href={`/rides/${encodeURIComponent(c.rideId)}`}>
+                <div class="record-label">{c.label}</div>
+                <div class="record-value">{c.value}</div>
+              </a>
+            ) : (
+              <div class="record card empty">
+                <div class="record-label">{c.label}</div>
+                <div class="record-value">—</div>
+              </div>
+            ),
+          )
+        }
+      </div>
+    </section>
+
+    <section class="dash-section">
+      <h2>Rides</h2>
+      {
+        rides.length === 0 && (
+          <p class="sub empty-note">
+            No rides yet — <a href="/upload">upload your first GPX</a>.
+          </p>
+        )
+      }
+      <div id="library" class="ride-grid" set:html={libraryHtml}></div>
+    </section>
+
+    <script id="index-data" type="application/json" is:inline set:html={indexData}></script>
   </main>
 </Layout>
+
+<script>
+  import { libraryHTML, monthlyDistance, monthlyChartSVG } from '../lib/dashboard';
+  import type { YearFilter } from '../lib/dashboard';
+  import type { IndexSummary } from '../lib/types';
+
+  // Re-scope the chart and library client-side when the year changes — the tiles
+  // and records grid stay all-time and are left untouched. Same pure functions
+  // the server used, driven by the embedded index so there's no round-trip.
+  const dataEl = document.getElementById('index-data');
+  const select = document.getElementById('year-select') as HTMLSelectElement | null;
+  const chart = document.getElementById('chart');
+  const library = document.getElementById('library');
+  if (dataEl && select && chart && library) {
+    const data = JSON.parse(dataEl.textContent ?? '{}') as {
+      rides: IndexSummary[];
+      holders: string[];
+    };
+    const holders = new Set(data.holders);
+
+    function render(year: YearFilter): void {
+      chart!.innerHTML = monthlyChartSVG(monthlyDistance(data.rides, year));
+      library!.innerHTML = libraryHTML(data.rides, year, holders);
+    }
+
+    select.addEventListener('change', () => {
+      const v = select.value;
+      render(v === 'all' ? 'all' : Number(v));
+    });
+  }
+</script>
