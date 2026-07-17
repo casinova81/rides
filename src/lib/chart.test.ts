@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { chartGeometry, chartSVG, CHART_W, CHART_PAD } from './chart';
+import {
+  chartGeometry,
+  chartSVG,
+  compareChartGeometry,
+  compareChartSVG,
+  CHART_W,
+  CHART_PAD,
+} from './chart';
 import { Track } from './track';
 import type { Track as TrackData } from './types';
 
@@ -95,6 +102,65 @@ describe('chartSVG', () => {
     expect(svg).toContain('preserveAspectRatio="none"');
     expect(svg).toContain('data-chart="speed"');
     expect(svg).toContain('class="chart__cursor"');
+    expect(svg.endsWith('</svg>')).toBe(true);
+  });
+});
+
+// The compare charts (ticket 6): both rides on one shared axis. The x domain is
+// 0→max of the two distances; the y domain spans both series; each series' line
+// stops at its own distance so a shorter ride ends before the right edge.
+const short = track; // 0..400 m, elevation 10→50→10
+const long = new Track({
+  lat: [0, 0, 0, 0, 0],
+  lon: [0, 0.002, 0.004, 0.006, 0.008],
+  ele: [20, 30, 40, 50, 60],
+  t: [0, 80, 160, 240, 320],
+  dist: [0, 200, 400, 600, 800],
+  speed: [4, 5, 6, 7, 8],
+});
+
+describe('compareChartGeometry — shared axes', () => {
+  const g = compareChartGeometry([short, long], 'elevation');
+
+  it('spans the longer ride on x and both rides on y', () => {
+    expect(g.minDist).toBe(0);
+    expect(g.maxDist).toBe(800); // max of 400 and 800
+    expect(g.minValue).toBe(10); // min across both series
+    expect(g.maxValue).toBe(60); // max across both series
+    expect(g.xForDist(0)).toBeCloseTo(CHART_PAD.left, 5);
+    expect(g.xForDist(800)).toBeCloseTo(CHART_W - CHART_PAD.right, 5);
+  });
+
+  it('distForX inverts xForDist over the shared domain', () => {
+    for (const d of [0, 200, 400, 800]) {
+      expect(g.distForX(g.xForDist(d))).toBeCloseTo(d, 3);
+    }
+  });
+
+  it('gives one path per ride, each ending at its own distance', () => {
+    expect(g.series).toHaveLength(2);
+    expect(g.series[0].maxDist).toBe(400);
+    expect(g.series[1].maxDist).toBe(800);
+    // The short ride's line ends mid-axis (at x for 400), not at the right edge.
+    const lastX = (path: string) => {
+      const nums = path.match(/-?\d+(\.\d+)?/g)!.map(Number);
+      return nums[nums.length - 2];
+    };
+    expect(lastX(g.series[0].path)).toBeCloseTo(g.xForDist(400), 3);
+    expect(lastX(g.series[1].path)).toBeCloseTo(g.xForDist(800), 3);
+  });
+});
+
+describe('compareChartSVG', () => {
+  it('carries both series in their identity colours plus a cursor line each', () => {
+    const svg = compareChartSVG([short, long], 'speed', ['#2a78d6', '#e8802a']);
+    expect(svg.startsWith('<svg')).toBe(true);
+    expect(svg).toContain('data-chart="speed"');
+    // Identity colours set inline so they beat the .chart__line class rule.
+    expect(svg).toContain('stroke:#2a78d6');
+    expect(svg).toContain('stroke:#e8802a');
+    expect(svg).toContain('data-series="0"');
+    expect(svg).toContain('data-series="1"');
     expect(svg.endsWith('</svg>')).toBe(true);
   });
 });

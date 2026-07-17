@@ -9,6 +9,9 @@ import {
   fmtGradient,
   fmtSport,
   fmtEleDelta,
+  fmtDeltaKm,
+  fmtDeltaDuration,
+  fmtDeltaSpeedKmh,
 } from './format';
 
 // The single formatting layer (issue 03): stored values are SI; display is de-DE
@@ -64,6 +67,28 @@ describe('format — de-DE display of SI values', () => {
     expect(fmtEleDelta(-8)).toBe('-8 m');
     expect(fmtEleDelta(0)).toBe('0 m');
     expect(fmtEleDelta(-0.4)).toBe('0 m'); // rounds to -0 — must not render as "-0 m"
+  });
+
+  it('renders signed deltas with an explicit + on gains (compare Δ column)', () => {
+    // Δ = ride 2 − ride 1: positive gets a +, negative keeps its -, zero stays bare.
+    expect(fmtDeltaKm(2300)).toBe('+2,3 km');
+    expect(fmtDeltaKm(-1000)).toBe('-1,0 km');
+    expect(fmtDeltaKm(0)).toBe('0,0 km');
+
+    // fmtDuration itself assumes a non-negative time; the delta formatter must
+    // format the magnitude and carry the sign, never feed a negative through.
+    expect(fmtDeltaDuration(83)).toBe('+1:23');
+    expect(fmtDeltaDuration(-83)).toBe('-1:23');
+    expect(fmtDeltaDuration(3661)).toBe('+1:01:01');
+    expect(fmtDeltaDuration(0)).toBe('0:00');
+
+    expect(fmtDeltaSpeedKmh(1)).toBe('+3,6 km/h');
+    expect(fmtDeltaSpeedKmh(-1)).toBe('-3,6 km/h');
+    expect(fmtDeltaSpeedKmh(0)).toBe('0,0 km/h');
+
+    // A delta whose magnitude rounds below the display precision reads as an
+    // unsigned zero, never "-0,0 km".
+    expect(fmtDeltaKm(-40)).toBe('0,0 km');
   });
 
   it('prettifies a raw Komoot sport code into an English label', () => {

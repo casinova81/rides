@@ -53,68 +53,105 @@ export interface ChartGeometry {
 
 const round = (n: number) => Math.round(n * 100) / 100;
 
-/**
- * Pure geometry for one distance-keyed chart over `track`. The x axis is
- * cumulative distance [0, totalDistance]; the y axis is the value's own min/max
- * (a flat series collapses to the box's vertical centre rather than dividing by
- * zero). `xForDist`/`distForX` are exact linear inverses — the invariant the
- * chart↔map↔playback sync relies on. Dimensions are the fixed viewBox constants:
- * the SVG stretches to its container via CSS, so they never vary per call.
- */
-export function chartGeometry(track: Track, kind: ChartKind): ChartGeometry {
-  const width = CHART_W;
-  const height = CHART_H;
-  const spec = SPECS[kind];
-  const minDist = 0;
-  const maxDist = track.totalDistance;
-  const distSpan = maxDist - minDist || 1;
+interface SampledSeries {
+  dists: number[];
+  values: number[];
+  min: number;
+  max: number;
+}
 
-  const left = CHART_PAD.left;
-  const right = width - CHART_PAD.right;
-  const top = CHART_PAD.top;
-  const bottom = height - CHART_PAD.bottom;
-
-  // Resample evenly by distance so the path size is bounded regardless of point count.
-  const cols = Math.max(2, Math.min(COLS, track.n));
+/** Resample `track`'s value at `cols` points evenly across [0, upto] metres. */
+function sampleSeries(track: Track, spec: ChartSpec, upto: number, cols: number): SampledSeries {
+  const span = upto || 1;
   const dists: number[] = new Array(cols);
   const values: number[] = new Array(cols);
-  let minValue = Infinity;
-  let maxValue = -Infinity;
+  let min = Infinity;
+  let max = -Infinity;
   for (let i = 0; i < cols; i++) {
-    const d = minDist + (distSpan * i) / (cols - 1);
+    const d = (span * i) / (cols - 1);
     const v = spec.value(track.sampleByDist(d));
     dists[i] = d;
     values[i] = v;
-    if (v < minValue) minValue = v;
-    if (v > maxValue) maxValue = v;
+    if (v < min) min = v;
+    if (v > max) max = v;
   }
+  return { dists, values, min, max };
+}
+
+interface Mappers {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+  xForDist(d: number): number;
+  distForX(x: number): number;
+  yForValue(v: number): number;
+}
+
+/**
+ * The linear x (distance) and y (value) mappers over an explicit domain, shared by
+ * the single-track and compare charts. `xForDist`/`distForX` are exact inverses —
+ * the invariant chart↔map↔playback sync relies on; a flat value span collapses to
+ * the box's vertical centre rather than dividing by zero.
+ */
+function mappers(minDist: number, maxDist: number, minValue: number, maxValue: number): Mappers {
+  const left = CHART_PAD.left;
+  const right = CHART_W - CHART_PAD.right;
+  const top = CHART_PAD.top;
+  const bottom = CHART_H - CHART_PAD.bottom;
+  const distSpan = maxDist - minDist || 1;
   const valueSpan = maxValue - minValue;
-
-  const xForDist = (d: number) => left + ((d - minDist) / distSpan) * (right - left);
-  const distForX = (x: number) => {
-    const d = minDist + ((x - left) / (right - left)) * distSpan;
-    return Math.max(minDist, Math.min(maxDist, d));
+  return {
+    left,
+    right,
+    top,
+    bottom,
+    xForDist: (d) => left + ((d - minDist) / distSpan) * (right - left),
+    distForX: (x) =>
+      Math.max(minDist, Math.min(maxDist, minDist + ((x - left) / (right - left)) * distSpan)),
+    yForValue: (v) =>
+      valueSpan > 0 ? bottom - ((v - minValue) / valueSpan) * (bottom - top) : (top + bottom) / 2,
   };
-  const yForValue = (v: number) =>
-    valueSpan > 0 ? bottom - ((v - minValue) / valueSpan) * (bottom - top) : (top + bottom) / 2;
+}
 
+/** An `M…L…` polyline through the sampled points, mapped to viewBox coordinates. */
+function buildPath(s: SampledSeries, m: Mappers): string {
   let path = '';
-  for (let i = 0; i < cols; i++) {
-    path += `${i === 0 ? 'M' : 'L'}${round(xForDist(dists[i]))} ${round(yForValue(values[i]))}`;
+  for (let i = 0; i < s.dists.length; i++) {
+    path += `${i === 0 ? 'M' : 'L'}${round(m.xForDist(s.dists[i]))} ${round(m.yForValue(s.values[i]))}`;
   }
-  const area = `${path}L${round(right)} ${round(bottom)}L${round(left)} ${round(bottom)}Z`;
+  return path;
+}
+
+/** Points to resample a track to: bounded by COLS, never fewer than its own points. */
+const colsFor = (track: Track) => Math.max(2, Math.min(COLS, track.n));
+
+/**
+ * Pure geometry for one distance-keyed chart over `track`. The x axis is
+ * cumulative distance [0, totalDistance]; the y axis is the value's own min/max.
+ * Dimensions are the fixed viewBox constants: the SVG stretches to its container
+ * via CSS, so they never vary per call.
+ */
+export function chartGeometry(track: Track, kind: ChartKind): ChartGeometry {
+  const spec = SPECS[kind];
+  const maxDist = track.totalDistance;
+  const s = sampleSeries(track, spec, maxDist, colsFor(track));
+  const m = mappers(0, maxDist, s.min, s.max);
+
+  const path = buildPath(s, m);
+  const area = `${path}L${round(m.right)} ${round(m.bottom)}L${round(m.left)} ${round(m.bottom)}Z`;
 
   return {
     kind,
-    width,
-    height,
-    minDist,
+    width: CHART_W,
+    height: CHART_H,
+    minDist: 0,
     maxDist,
-    minValue,
-    maxValue,
-    xForDist,
-    distForX,
-    yForValue,
+    minValue: s.min,
+    maxValue: s.max,
+    xForDist: m.xForDist,
+    distForX: m.distForX,
+    yForValue: m.yForValue,
     path,
     area,
   };
@@ -140,5 +177,101 @@ export function chartSVG(track: Track, kind: ChartKind): string {
     `<line class="chart__cursor" x1="0" y1="0" x2="0" y2="${height}"` +
     ` vector-effect="non-scaling-stroke" style="display:none" />` +
     `</svg>`
+  );
+}
+
+/** One ride's line within a compare chart, ending at its own distance. */
+export interface CompareSeries {
+  /** The ride's total distance (m) — where its line stops (≤ the shared maxDist). */
+  maxDist: number;
+  path: string;
+}
+
+export interface CompareChartGeometry {
+  kind: ChartKind;
+  width: number;
+  height: number;
+  minDist: number;
+  /** Shared x extent: the longer of the two rides. */
+  maxDist: number;
+  /** Shared y extent: min/max across both series. */
+  minValue: number;
+  maxValue: number;
+  xForDist(d: number): number;
+  distForX(x: number): number;
+  yForValue(v: number): number;
+  series: CompareSeries[];
+}
+
+/**
+ * Pure geometry for a compare chart (ticket 6): both rides on one shared distance
+ * axis (0 → the longer ride) and one shared value axis (min/max across both). Each
+ * series is resampled over *its own* extent, so a shorter ride's line stops mid-axis
+ * rather than being stretched — the visual cue that the rides differ in length. The
+ * mappers are shared, so the client hit-tests hover x → distance once for both.
+ */
+export function compareChartGeometry(tracks: Track[], kind: ChartKind): CompareChartGeometry {
+  const spec = SPECS[kind];
+  const maxDist = Math.max(...tracks.map((t) => t.totalDistance));
+
+  let minValue = Infinity;
+  let maxValue = -Infinity;
+  const sampled = tracks.map((t) => {
+    const s = sampleSeries(t, spec, t.totalDistance, colsFor(t));
+    if (s.min < minValue) minValue = s.min;
+    if (s.max > maxValue) maxValue = s.max;
+    return s;
+  });
+
+  const m = mappers(0, maxDist, minValue, maxValue);
+  const series: CompareSeries[] = sampled.map((s, i) => ({
+    maxDist: tracks[i].totalDistance,
+    path: buildPath(s, m),
+  }));
+
+  return {
+    kind,
+    width: CHART_W,
+    height: CHART_H,
+    minDist: 0,
+    maxDist,
+    minValue,
+    maxValue,
+    xForDist: m.xForDist,
+    distForX: m.distForX,
+    yForValue: m.yForValue,
+    series,
+  };
+}
+
+/**
+ * A full-width compare-chart SVG: one line per ride in its identity colour and one
+ * hidden cursor line per ride (they diverge during the ghost race, coincide on
+ * hover). No area fills — two translucent fills over one axis just muddy each other.
+ */
+export function compareChartSVG(tracks: Track[], kind: ChartKind, colors: string[]): string {
+  const g = compareChartGeometry(tracks, kind);
+  const spec = SPECS[kind];
+  // The identity stroke is set inline (not as a `stroke` attribute) so it outranks
+  // `.chart__line { stroke: var(--series) }` from global.css — a presentation
+  // attribute would lose to that class rule and both lines would render one colour.
+  const lines = g.series
+    .map(
+      (s, i) =>
+        `<path class="chart__line" d="${s.path}" fill="none" vector-effect="non-scaling-stroke"` +
+        ` style="stroke:${colors[i]}" />`,
+    )
+    .join('');
+  const cursors = g.series
+    .map(
+      (_, i) =>
+        `<line class="chart__cursor" data-series="${i}" x1="0" y1="0" x2="0" y2="${g.height}"` +
+        ` vector-effect="non-scaling-stroke" style="stroke:${colors[i]};display:none" />`,
+    )
+    .join('');
+  return (
+    `<svg class="chart__svg" viewBox="0 0 ${g.width} ${g.height}" preserveAspectRatio="none"` +
+    ` data-chart="${kind}" xmlns="http://www.w3.org/2000/svg" role="img"` +
+    ` aria-label="${spec.label} over distance, both rides">${lines}${cursors}</svg>`
   );
 }

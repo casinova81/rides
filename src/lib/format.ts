@@ -67,10 +67,36 @@ export function fmtGradient(pct: number): string {
   return `${oneDp.format(pct)} %`;
 }
 
+/**
+ * Prefix an explicit `+` on a positive delta and `-` on a negative one, formatting
+ * the *magnitude* through `fmtAbs` (so formatters that assume a non-negative input,
+ * like fmtDuration, never see a negative). A delta whose magnitude rounds to the
+ * same string as zero renders unsigned — never a stray `-0,0`.
+ */
+function signedMag(value: number, fmtAbs: (n: number) => string): string {
+  const body = fmtAbs(Math.abs(value));
+  if (body === fmtAbs(0)) return body;
+  return value > 0 ? `+${body}` : `-${body}`;
+}
+
 /** A signed elevation delta in whole metres, e.g. `+12 m` / `-8 m` / `0 m`. */
 export function fmtEleDelta(meters: number): string {
-  const r = Math.round(meters) || 0; // `|| 0` folds a rounded -0 back to 0 → "0 m", not "-0 m"
-  return `${r > 0 ? '+' : ''}${whole.format(r)} m`;
+  return signedMag(meters, fmtElevation);
+}
+
+/** A signed distance delta in km, e.g. `+2,3 km` / `-1,0 km` / `0,0 km`. */
+export function fmtDeltaKm(meters: number): string {
+  return signedMag(meters, fmtKm);
+}
+
+/** A signed duration delta, e.g. `+1:23` / `-1:01:01` / `0:00`. */
+export function fmtDeltaDuration(seconds: number): string {
+  return signedMag(seconds, fmtDuration);
+}
+
+/** A signed speed delta in km/h, e.g. `+3,6 km/h` / `-3,6 km/h` / `0,0 km/h`. */
+export function fmtDeltaSpeedKmh(mps: number): string {
+  return signedMag(mps, fmtSpeedKmh);
 }
 
 /** Prettify a raw Komoot sport code (`e_bike`) into an English label (`E Bike`). */

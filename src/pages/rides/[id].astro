@@ -192,6 +192,8 @@ const speedChart = ride ? chartSVG(new Track(ride.track), 'speed') : '';
           </details>
 
           <div class="detail-actions">
+            <a class="btn" href={`/compare?a=${encodeURIComponent(ride.id)}`}>Compare…</a>
+            <span class="spacer" />
             <button id="delete-btn" class="btn danger" type="button" data-id={ride.id}>
               Delete ride
             </button>

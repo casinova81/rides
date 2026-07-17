@@ -106,12 +106,16 @@ export class Track {
 
   /**
    * Nearest point on the track polyline to a geographic point, returned as its
-   * interpolated cumulative distance (m) and the base segment index. Drives the
-   * map-hover → chart/playback sync (ticket 4d): the pointer's lng/lat becomes the
-   * shared cursor distance. Uses a local equirectangular projection (longitude
-   * scaled by cos(lat)); over a single ride's extent that planar error is metres.
+   * interpolated cumulative distance (m), the base segment index, and the squared
+   * planar distance `d2` to that point. Drives the map-hover → chart/playback sync
+   * (ticket 4d): the pointer's lng/lat becomes the shared cursor distance. Uses a
+   * local equirectangular projection (longitude scaled by cos(lat)); over a single
+   * ride's extent that planar error is metres. `d2` lets a caller comparing the
+   * same query point against several tracks pick the nearest (ticket 6 compare
+   * overlay) — the projection scale is fixed by the query lat, so the values are
+   * comparable across tracks queried at one point.
    */
-  nearestByPoint(lon: number, lat: number): { dist: number; index: number } {
+  nearestByPoint(lon: number, lat: number): { dist: number; index: number; d2: number } {
     const d = this.data;
     const kx = Math.cos((lat * Math.PI) / 180);
     const qx = lon * kx;
@@ -140,7 +144,7 @@ export class Track {
     }
 
     const dist = d.dist[bestIdx] + bestT * (d.dist[bestIdx + 1] - d.dist[bestIdx]);
-    return { dist, index: bestIdx };
+    return { dist, index: bestIdx, d2: bestDistSq };
   }
 
   /** Smoothed heading at distance `d`, taken from a look-ahead point (issue 07). */

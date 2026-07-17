@@ -1,0 +1,273 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { loadIndex, loadRide } from '../lib/db';
+import {
+  deltaTable,
+  splitsDiff,
+  COMPARE_COLOR_LIST,
+  GHOST_SPEEDS,
+  GHOST_DEFAULT_SPEED,
+} from '../lib/compare';
+import { compareChartSVG } from '../lib/chart';
+import { Track } from '../lib/track';
+import { fmtKm, fmtDate } from '../lib/format';
+import type { IndexSummary } from '../lib/types';
+
+// The compare page (ticket 6 / issue 13). Pick two rides — ride 1 blue, ride 2
+// orange, an identity that carries through the map, charts, and tables — and study
+// how the efforts relate: both tracks overlaid on one map, a ghost race on a shared
+// clock, shared-axis elevation/speed charts, a Δ table (2 − 1), and a collapsed
+// per-km splits diff. Any two rides; no route-similarity logic. Dynamic: the two
+// payloads load per request from the `?a=&b=` ids so a fresh upload is comparable
+// with no rebuild. The ride-detail "Compare…" button deep-links here with slot 1
+// prefilled; the nav links in with empty slots.
+export const prerender = false;
+
+const db = Astro.locals.runtime.env.DB;
+const index = await loadIndex(db);
+const rides = index.rides; // newest first
+
+const aId = Astro.url.searchParams.get('a');
+const bId = Astro.url.searchParams.get('b');
+const rideA = aId ? await loadRide(db, aId) : null;
+const rideB = bId ? await loadRide(db, bId) : null;
+const bothSelected = Boolean(rideA && rideB);
+
+const colors = COMPARE_COLOR_LIST;
+
+// Server-render every comparison surface (Δ table, splits, static charts) so the
+// page is meaningful before JS; the client controller upgrades map + cursors.
+const deltas = rideA && rideB ? deltaTable(rideA, rideB) : [];
+const splits = rideA && rideB ? splitsDiff(rideA, rideB) : [];
+const eleChart =
+  rideA && rideB
+    ? compareChartSVG([new Track(rideA.track), new Track(rideB.track)], 'elevation', colors)
+    : '';
+const speedChart =
+  rideA && rideB
+    ? compareChartSVG([new Track(rideA.track), new Track(rideB.track)], 'speed', colors)
+    : '';
+
+// Only the two names + tracks cross to the client (for the ghost race, map, and
+// chart cursors). Escape `<` so a ride name can't break out of the JSON island.
+const compareData =
+  rideA && rideB
+    ? JSON.stringify([
+        { name: rideA.name, track: rideA.track },
+        { name: rideB.name, track: rideB.track },
+      ]).replace(/</g, '\\u003c')
+    : '';
+
+const optLabel = (r: IndexSummary) => `${r.name} — ${fmtDate(r.start)} · ${fmtKm(r.stats.distance)}`;
+---
+
+<Layout title="Compare rides — Ride Tracker" nav="compare">
+  <main class="wrap">
+    <h1>Compare rides</h1>
+
+    <div class="compare-pickers">
+      <label class="slot">
+        <span class="slot-dot" style={`background:${colors[0]}`}></span>
+        <select id="slot-a" class="ride-select" data-slot="a" aria-label="Ride 1">
+          <option value="">Pick ride 1…</option>
+          {
+            rides.map((r) => (
+              <option value={r.id} selected={r.id === aId} disabled={r.id === bId}>
+                {optLabel(r)}
+              </option>
+            ))
+          }
+        </select>
+      </label>
+      <span class="vs-sep">vs</span>
+      <label class="slot">
+        <span class="slot-dot" style={`background:${colors[1]}`}></span>
+        <select id="slot-b" class="ride-select" data-slot="b" aria-label="Ride 2">
+          <option value="">Pick ride 2…</option>
+          {
+            rides.map((r) => (
+              <option value={r.id} selected={r.id === bId} disabled={r.id === aId}>
+                {optLabel(r)}
+              </option>
+            ))
+          }
+        </select>
+      </label>
+    </div>
+
+    {
+      rides.length < 2 && (
+        <p class="sub empty-note">
+          Upload at least two rides to compare — <a href="/upload">go to upload</a>.
+        </p>
+      )
+    }
+
+    {
+      !bothSelected ? (
+        rides.length >= 2 && (
+          <p class="sub compare-hint">
+            Pick two rides to overlay them on one map, race them on a shared clock, and diff their
+            splits.
+          </p>
+        )
+      ) : (
+        <>
+          <div
+            class="compare-map"
+            id="compare-map"
+            role="application"
+            aria-label="Both rides overlaid on one map"
+          />
+
+          <div class="ghost" id="ghost" hidden>
+            <button class="pb-btn" id="gh-play" type="button" aria-label="Play">
+              ▶
+            </button>
+            <span class="ghost-label">Ghost race</span>
+            <div class="pb-speeds" id="gh-speeds" role="group" aria-label="Ghost-race speed">
+              {GHOST_SPEEDS.map((s) => (
+                <button
+                  class={`pb-speed${s === GHOST_DEFAULT_SPEED ? ' active' : ''}`}
+                  type="button"
+                  data-speed={s}
+                >
+                  {s}×
+                </button>
+              ))}
+            </div>
+            <input
+              class="pb-scrub"
+              id="gh-scrub"
+              type="range"
+              min="0"
+              max="1000"
+              value="0"
+              aria-label="Seek the ghost race"
+            />
+            <span class="pb-time" id="gh-time" aria-live="off">0:00</span>
+            <span class="ghost-leader" id="gh-leader" aria-live="off" />
+          </div>
+
+          <script
+            type="application/json"
+            id="compare-data"
+            is:inline
+            set:html={compareData}
+          />
+
+          <section class="charts" id="compare-charts" aria-label="Elevation and speed, both rides">
+            <figure class="chart" data-chart-kind="elevation">
+              <figcaption class="chart__cap">
+                <span class="chart__title">Elevation</span>
+                <span class="compare-readouts">
+                  <output class="chart__readout" data-readout="elevation" data-series="0" style={`color:${colors[0]}`} />
+                  <output class="chart__readout" data-readout="elevation" data-series="1" style={`color:${colors[1]}`} />
+                </span>
+              </figcaption>
+              <div class="chart__plot" set:html={eleChart} />
+            </figure>
+            <figure class="chart" data-chart-kind="speed">
+              <figcaption class="chart__cap">
+                <span class="chart__title">Speed</span>
+                <span class="compare-readouts">
+                  <output class="chart__readout" data-readout="speed" data-series="0" style={`color:${colors[0]}`} />
+                  <output class="chart__readout" data-readout="speed" data-series="1" style={`color:${colors[1]}`} />
+                </span>
+              </figcaption>
+              <div class="chart__plot" set:html={speedChart} />
+            </figure>
+          </section>
+
+          <div class="card compare-table-card">
+            <table class="vs">
+              <thead>
+                <tr>
+                  <th />
+                  <th>
+                    <span class="slot-dot" style={`background:${colors[0]}`} />
+                    {rideA!.name}
+                  </th>
+                  <th>
+                    <span class="slot-dot" style={`background:${colors[1]}`} />
+                    {rideB!.name}
+                  </th>
+                  <th>Δ (2−1)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {deltas.map((row) => (
+                  <tr>
+                    <td class="vs-label">{row.label}</td>
+                    <td>{row.a}</td>
+                    <td>{row.b}</td>
+                    <td class="vs-delta">{row.delta}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <details class="more compare-splits">
+            <summary>Per-km splits diff</summary>
+            <p class="sub compare-splits-hint">
+              Δ = ride 2 − ride 1 time, coloured by whoever was faster that km.
+            </p>
+            <table class="splits splitdiff">
+              <thead>
+                <tr>
+                  <th>Km</th>
+                  <th>
+                    <span class="slot-dot" style={`background:${colors[0]}`} /> Time
+                  </th>
+                  <th>
+                    <span class="slot-dot" style={`background:${colors[1]}`} /> Time
+                  </th>
+                  <th>Δ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {splits.map((row) => (
+                  <tr>
+                    <td>{row.km}</td>
+                    <td>{row.a}</td>
+                    <td>{row.b}</td>
+                    <td
+                      style={
+                        row.faster ? `color:${row.faster === 'a' ? colors[0] : colors[1]}` : undefined
+                      }
+                    >
+                      {row.delta}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </details>
+        </>
+      )
+    }
+  </main>
+</Layout>
+
+<script>
+  // Upgrade the static comparison into the live overlay map + ghost race (ticket 6).
+  import { mountCompare } from '../scripts/compare';
+  mountCompare();
+</script>
+
+<script>
+  // Picker: changing a slot deep-links to /compare with the two ride ids so the
+  // server loads both payloads. The other slot's current selection is preserved.
+  document.querySelectorAll('.ride-select').forEach((el) => {
+    const sel = el as unknown as HTMLSelectElement;
+    sel.addEventListener('change', () => {
+      const url = new URL(window.location.href);
+      const slot = sel.dataset.slot;
+      if (!slot) return;
+      if (sel.value) url.searchParams.set(slot, sel.value);
+      else url.searchParams.delete(slot);
+      window.location.href = url.toString();
+    });
+  });
+</script>

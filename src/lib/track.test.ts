@@ -72,4 +72,11 @@ describe('Track.nearestByPoint (map-hover → distance, ticket 4d)', () => {
     expect(track.nearestByPoint(-0.001, 0).dist).toBe(0);
     expect(track.nearestByPoint(0.01, 0).dist).toBeCloseTo(200, 0);
   });
+
+  it('reports the planar squared distance so the nearer of two tracks can be picked', () => {
+    // A point on a vertex has ~zero planar distance; an offset point is farther.
+    expect(track.nearestByPoint(0.000899, 0).d2).toBeCloseTo(0, 6);
+    const off = track.nearestByPoint(0.000899, 0.0005);
+    expect(off.d2).toBeGreaterThan(track.nearestByPoint(0.000899, 0.0001).d2);
+  });
 });
