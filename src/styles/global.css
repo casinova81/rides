@@ -15,6 +15,7 @@
   --ride-1: #2a78d6; /* compare identity: ride 1 (blue) */
   --ride-2: #e8802a; /* compare identity: ride 2 (orange) */
   --accent: #0b0b0b;
+  --track: #e6413c; /* the ridden line + playback marker on the live map hero */
   --danger: #c0392b;
   --gold: #d4a017;
 }
@@ -348,9 +349,12 @@ a.record:hover {
 .detail-sub {
   margin: 4px 0 0;
 }
-/* map-hero placeholder — a static route line until the live map (ticket 4b) */
+/* Map hero: a static SVG route line (pre-JS / map-load-failure fallback) that the
+   client upgrades to a live 2D-follow map with a playback bar (tickets 4a + 4b). */
 .hero {
+  position: relative;
   margin-bottom: 14px;
+  height: clamp(320px, 56vh, 520px);
   border: 1px solid var(--ring);
   border-radius: 12px;
   background:
@@ -358,10 +362,112 @@ a.record:hover {
     repeating-linear-gradient(0deg, transparent 0 23px, var(--grid) 23px 24px);
   overflow: hidden;
 }
+.hero__placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
 .hero .hero-line {
   display: block;
   width: 100%;
-  height: auto;
+  height: 100%;
+}
+/* `.hero .hero__map` outranks maplibre-gl.css's `.maplibregl-map{position:relative}`,
+   which shares this element and would otherwise collapse the absolute box to 0 height. */
+.hero .hero__map {
+  position: absolute;
+  inset: 0;
+  /* visibility (not display:none) keeps layout size so MapLibre can measure. */
+  visibility: hidden;
+}
+.hero--live .hero__placeholder {
+  display: none;
+}
+.hero--live .hero__map {
+  visibility: visible;
+}
+
+/* Travel-direction marker (rotated to the smoothed bearing). */
+.ride-marker {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+}
+.ride-marker__arrow {
+  width: 0;
+  height: 0;
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  border-bottom: 20px solid var(--track);
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.6));
+}
+
+/* Translucent playback bar overlaying the live hero. */
+.playback {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: calc(100% - 24px);
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(20, 22, 26, 0.72);
+  backdrop-filter: blur(6px);
+  color: #f4f4f5;
+}
+.playback[hidden] {
+  display: none;
+}
+.pb-btn {
+  border: none;
+  background: var(--track);
+  color: #fff;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  flex: none;
+}
+.pb-speeds {
+  display: flex;
+  gap: 4px;
+}
+.pb-speed {
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: transparent;
+  color: inherit;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.pb-speed.active {
+  background: var(--track);
+  border-color: var(--track);
+  color: #fff;
+}
+.pb-scrub {
+  flex: 1 1 140px;
+  min-width: 120px;
+  accent-color: var(--track);
+  cursor: pointer;
+}
+.pb-time {
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  min-width: 96px;
+  text-align: right;
+  white-space: nowrap;
 }
 /* Four headline tiles: 2×2 on mobile, one row on wider screens. */
 .detail-tiles {

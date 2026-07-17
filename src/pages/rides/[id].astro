@@ -9,12 +9,14 @@ import {
   splitRows,
 } from '../../lib/ride-detail';
 import { trackHeroSVG } from '../../lib/thumb';
+import { SPEED_STEPS } from '../../lib/playback';
 
-// The ride detail shell (ticket 4a): full stats for one ride, plus delete.
-// Reads the per-ride payload from D1 per request (dynamic — a freshly-uploaded
-// ride is viewable with no rebuild). The map hero is a static route-line
-// placeholder until ticket 4b makes it live. Delete hits the Worker endpoint
-// and lets records/totals self-heal on the next index read.
+// The ride detail page (tickets 4a + 4b): full stats for one ride, a live map
+// hero with 2D-follow playback, and delete. Reads the per-ride payload from D1
+// per request (dynamic — a freshly-uploaded ride is viewable with no rebuild).
+// The static SVG route line is the pre-JS / map-load-failure fallback; the client
+// controller upgrades the hero to a live map. Delete hits the Worker endpoint and
+// lets records/totals self-heal on the next index read.
 export const prerender = false;
 
 const { id } = Astro.params;
@@ -49,7 +51,37 @@ const splits = ride ? splitRows(ride.splits) : [];
             <p class="sub detail-sub">{detailSubline(ride)}</p>
           </header>
 
-          <div class="hero" set:html={heroSvg} />
+          <div class="hero" id="ride-hero">
+            <div class="hero__placeholder" set:html={heroSvg} />
+            <div class="hero__map" id="map-hero" role="application" aria-label="Ride playback map" />
+            <div class="playback" id="playback" hidden>
+              <button class="pb-btn" id="pb-play" type="button" aria-label="Play">▶</button>
+              <div class="pb-speeds" id="pb-speeds" role="group" aria-label="Playback speed">
+                {
+                  SPEED_STEPS.map((s, i) => (
+                    <button
+                      class={`pb-speed${i === 1 ? ' active' : ''}`}
+                      type="button"
+                      data-speed={s}
+                    >
+                      {s}×
+                    </button>
+                  ))
+                }
+              </div>
+              <input
+                class="pb-scrub"
+                id="pb-scrub"
+                type="range"
+                min="0"
+                max="1000"
+                value="0"
+                aria-label="Seek through the ride"
+              />
+              <span class="pb-time" id="pb-time" aria-live="off">0:00</span>
+            </div>
+          </div>
+          <script type="application/json" id="ride-track" is:inline set:html={JSON.stringify(ride.track)} />
 
           <div class="tiles detail-tiles">
             {tiles.map((t) => (
@@ -129,6 +161,12 @@ const splits = ride ? splitRows(ride.splits) : [];
     }
   </main>
 </Layout>
+
+<script>
+  // Upgrade the static hero to a live 2D-follow map with playback (ticket 4b).
+  import { mountRidePlayback } from '../../scripts/ride-playback';
+  mountRidePlayback();
+</script>
 
 <script>
   // Delete behind a confirmation → the Worker delete endpoint. On success the
