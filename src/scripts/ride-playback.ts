@@ -3,6 +3,7 @@ import { Track } from '../lib/track';
 import { PlaybackCore } from '../lib/playback';
 import { mapModes, type MapView } from '../lib/mapview';
 import { fmtDuration } from '../lib/format';
+import { mountCharts } from './ride-charts';
 import type { RidePose, Track as TrackData } from '../lib/types';
 
 // The ride-detail playback controller (ticket 4b + 4c). Wires the engine-agnostic
@@ -34,6 +35,7 @@ export async function mountRidePlayback(): Promise<void> {
   if (!trackData?.t?.length) return;
 
   const track = new Track(trackData);
+  const core = new PlaybackCore(track);
 
   // The toggle is the flat-mapped registry (issue 09 growth path): each entry is a
   // {view factory, mode}. A mode change rebuilds the view from its factory, so the
@@ -42,24 +44,26 @@ export async function mountRidePlayback(): Promise<void> {
   const choices = mapModes();
   let view: MapView | null = null;
 
+  // The map-cursor → shared-cursor channel (ticket 4d). Late-bound: the map is built
+  // in the background, but it only ever fires this at runtime, by when `onCursor`
+  // points at the real seek. Hovering the map seeks playback, which moves the charts
+  // too — closing the chart↔map↔playback loop.
+  let onCursor: (dist: number) => void = () => {};
+
   /** Build (or rebuild) the live view for `modeId`, replacing any current one. */
   const buildView = async (modeId: string): Promise<void> => {
     const choice = choices.find((c) => c.mode.id === modeId) ?? choices[0];
-    const next = await choice.view.create(container, track, {});
+    const next = await choice.view.create(container, track, {
+      onHover: (dist) => {
+        if (dist !== null) onCursor(dist);
+      },
+    });
     next.setMode(choice.mode.id);
     view = next;
+    // The map is live now — hide the static SVG placeholder (idempotent across swaps).
+    hero.classList.add('hero--live');
   };
 
-  // On initial failure we leave the static SVG placeholder rather than a broken hero.
-  try {
-    await buildView(choices[0].mode.id);
-  } catch (err) {
-    console.error('Ride map failed to load:', err);
-    return;
-  }
-
-  const core = new PlaybackCore(track);
-  hero.classList.add('hero--live');
   bar.hidden = false;
 
   // The scrubber's integer range is the single source of seek resolution (the
@@ -70,6 +74,13 @@ export async function mountRidePlayback(): Promise<void> {
   let lastTs = 0;
   let scrubbing = false;
   let swapping = false;
+
+  // The charts are the third sync surface (ticket 4d), mounted independently of the
+  // map: they stay live while the map bundle loads (and even if it fails). Hovering
+  // one calls back with a distance; we seek playback there so the map marker + clock
+  // + both chart cursors all land on the same point. The controller owns no cursor
+  // state beyond the playback clock — that is the single shared cursor.
+  const charts = mountCharts(track, (dist) => seekToDist(dist));
 
   const setPlayLabel = () => {
     playBtn.textContent = core.playing ? '⏸' : '▶';
@@ -84,6 +95,9 @@ export async function mountRidePlayback(): Promise<void> {
     // During a mode swap there's briefly no live view (destroy → create); the clock
     // still advances and the bar still updates, the camera just catches up on rebuild.
     if (view) view.updateFrame(pose);
+    // Chart cursors track the same pose — the readout shows the track's own value at
+    // this distance (not the smoothed camera elevation), so the numbers are honest.
+    charts.update(pose.distance);
     if (!scrubbing) scrub.value = String(Math.round(core.progress * scrubMax));
     setClock();
     setPlayLabel();
@@ -110,6 +124,15 @@ export async function mountRidePlayback(): Promise<void> {
 
   // A single absolute frame for paused/seek states (dt=0 → snaps after a seek).
   const renderOnce = () => render(core.frame(0));
+
+  // Seek to a track distance and repaint once. This is the shared-cursor setter the
+  // charts and the map both drive; playback drives itself via the rAF loop. seek()
+  // resets smoothing so the pose snaps exactly to the hovered point.
+  const seekToDist = (dist: number) => {
+    core.seek(track.sampleByDist(dist).time);
+    renderOnce();
+  };
+  onCursor = seekToDist;
 
   playBtn.addEventListener('click', () => {
     core.toggle();
@@ -165,12 +188,19 @@ export async function mountRidePlayback(): Promise<void> {
     () => {
       if (rafId) cancelAnimationFrame(rafId);
       view?.destroy();
+      charts.destroy();
     },
     { once: true },
   );
 
-  // Initial state: the constructor's fitted overview stays until the first play,
-  // with the marker parked at the start; only the clock needs priming.
+  // Initial state: the clock and the chart cursors are primed at the start straight
+  // away (no map needed). The map is built in the background — its constructor's
+  // fitted overview stays until the first play; on failure the static SVG hero
+  // remains and the charts + bar still work.
   setClock();
   setPlayLabel();
+  charts.update(0);
+  void buildView(choices[0].mode.id).catch((err) =>
+    console.error('Ride map failed to load:', err),
+  );
 }

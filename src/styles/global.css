@@ -488,6 +488,74 @@ a.record:hover {
   text-align: right;
   white-space: nowrap;
 }
+
+/* Synced elevation + speed charts under the hero (ticket 4d). Stacked, full-width;
+   the fixed-viewBox SVG stretches to the container, so distance maps linearly to x.
+   Static without JS; the controller reveals the cursor and wires chart↔map↔playback. */
+.charts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.chart {
+  margin: 0;
+  border: 1px solid var(--ring);
+  border-radius: 10px;
+  background: var(--surface-1);
+  padding: 8px 10px 4px;
+}
+.chart__cap {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+.chart__title {
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.chart__readout {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-1);
+  font-weight: 600;
+}
+.chart__plot {
+  position: relative;
+}
+.chart__svg {
+  display: block;
+  width: 100%;
+  height: clamp(84px, 14vh, 130px);
+  overflow: visible;
+  cursor: crosshair;
+  touch-action: none;
+}
+/* Each series keeps its design-token identity: elevation blue, speed violet. */
+[data-chart-kind='elevation'] {
+  --series: var(--ele);
+}
+[data-chart-kind='speed'] {
+  --series: var(--spd);
+}
+.chart__area {
+  fill: color-mix(in srgb, var(--series) 16%, transparent);
+  stroke: none;
+}
+.chart__line {
+  stroke: var(--series);
+  stroke-width: 1.75;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.chart__cursor {
+  stroke: var(--ink-1);
+  stroke-width: 1;
+  opacity: 0.5;
+  pointer-events: none;
+}
 /* Four headline tiles: 2×2 on mobile, one row on wider screens. */
 .detail-tiles {
   grid-template-columns: repeat(2, 1fr);

@@ -104,6 +104,45 @@ export class Track {
     return max;
   }
 
+  /**
+   * Nearest point on the track polyline to a geographic point, returned as its
+   * interpolated cumulative distance (m) and the base segment index. Drives the
+   * map-hover → chart/playback sync (ticket 4d): the pointer's lng/lat becomes the
+   * shared cursor distance. Uses a local equirectangular projection (longitude
+   * scaled by cos(lat)); over a single ride's extent that planar error is metres.
+   */
+  nearestByPoint(lon: number, lat: number): { dist: number; index: number } {
+    const d = this.data;
+    const kx = Math.cos((lat * Math.PI) / 180);
+    const qx = lon * kx;
+    const qy = lat;
+
+    let bestDistSq = Infinity;
+    let bestIdx = 0;
+    let bestT = 0;
+    for (let i = 0; i < this.n - 1; i++) {
+      const ax = d.lon[i] * kx;
+      const ay = d.lat[i];
+      const bx = d.lon[i + 1] * kx;
+      const by = d.lat[i + 1];
+      const dx = bx - ax;
+      const dy = by - ay;
+      const lenSq = dx * dx + dy * dy;
+      const t = lenSq > 0 ? Math.max(0, Math.min(1, ((qx - ax) * dx + (qy - ay) * dy) / lenSq)) : 0;
+      const px = ax + t * dx;
+      const py = ay + t * dy;
+      const distSq = (qx - px) ** 2 + (qy - py) ** 2;
+      if (distSq < bestDistSq) {
+        bestDistSq = distSq;
+        bestIdx = i;
+        bestT = t;
+      }
+    }
+
+    const dist = d.dist[bestIdx] + bestT * (d.dist[bestIdx + 1] - d.dist[bestIdx]);
+    return { dist, index: bestIdx };
+  }
+
   /** Smoothed heading at distance `d`, taken from a look-ahead point (issue 07). */
   bearingAt(d: number, lookahead = 25): number {
     const here = this.sampleByDist(d);

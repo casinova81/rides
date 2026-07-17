@@ -26,7 +26,16 @@ export interface MapViewFactory {
   create(
     container: HTMLElement,
     track: Track,
-    opts: { onUserCameraInput?: () => void },
+    opts: {
+      onUserCameraInput?: () => void;
+      /**
+       * The map cursor channel (ticket 4d): fires the track distance (m) nearest
+       * the pointer as it moves over the map, and `null` when it leaves. The
+       * controller feeds this into the shared cursor so the map drives the charts
+       * and playback, closing the chart↔map↔playback loop.
+       */
+      onHover?: (distance: number | null) => void;
+    },
   ): Promise<MapView>;
 }
 

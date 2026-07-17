@@ -88,6 +88,22 @@ export const maplibreFactory: MapViewFactory = {
       map.on('rotatestart', fire);
     }
 
+    // The map-cursor channel (ticket 4d): report the track distance nearest the
+    // pointer so the map drives the charts + playback. Nearest-point math is pure
+    // (Track.nearestByPoint) — the adapter only converts screen → lng/lat here. A
+    // drag-pan also fires mousemove, so it's gated behind a drag flag: repositioning
+    // the camera must not scrub playback, only genuine hover does.
+    if (opts.onHover) {
+      const onHover = opts.onHover;
+      let dragging = false;
+      map.on('dragstart', () => (dragging = true));
+      map.on('dragend', () => (dragging = false));
+      map.on('mousemove', (e) => {
+        if (!dragging) onHover(track.nearestByPoint(e.lngLat.lng, e.lngLat.lat).dist);
+      });
+      map.on('mouseout', () => onHover(null));
+    }
+
     // A per-map ResizeObserver keeps the canvas sized to its container (map rule).
     const ro = new ResizeObserver(() => map.resize());
     ro.observe(container);

@@ -54,3 +54,22 @@ describe('Track sampling', () => {
     expect(track.bearingAt(0, 25)).toBeCloseTo(90, 0);
   });
 });
+
+describe('Track.nearestByPoint (map-hover → distance, ticket 4d)', () => {
+  const track = new Track(data);
+
+  it('returns the vertex distance for a point on a track vertex', () => {
+    expect(track.nearestByPoint(0.000899, 0).dist).toBeCloseTo(100, 0);
+  });
+
+  it('projects an off-track point onto the nearest segment', () => {
+    // Just north of the segment midpoint (~150 m) → projects to ~150 m along.
+    const q = track.nearestByPoint(0.001349, 0.0002);
+    expect(q.dist).toBeCloseTo(150, 0);
+  });
+
+  it('clamps before the start and after the end to the endpoints', () => {
+    expect(track.nearestByPoint(-0.001, 0).dist).toBe(0);
+    expect(track.nearestByPoint(0.01, 0).dist).toBeCloseTo(200, 0);
+  });
+});

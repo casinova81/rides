@@ -9,6 +9,8 @@ import {
   splitRows,
 } from '../../lib/ride-detail';
 import { trackHeroSVG } from '../../lib/thumb';
+import { chartSVG } from '../../lib/chart';
+import { Track } from '../../lib/track';
 import { SPEED_STEPS } from '../../lib/playback';
 import { mapModes } from '../../lib/mapview';
 
@@ -36,6 +38,11 @@ const splits = ride ? splitRows(ride.splits) : [];
 // The camera-mode toggle is the flat-mapped engine registry (issue 09), rendered
 // server-side so the ordered mode list is the single source of truth. First = default.
 const modes = mapModes();
+// Elevation + speed charts (ticket 4d), rendered server-side from the same pure
+// geometry the client re-derives to hit-test hover x → distance. Static without JS;
+// the controller upgrades them with a synced cursor.
+const eleChart = ride ? chartSVG(new Track(ride.track), 'elevation') : '';
+const speedChart = ride ? chartSVG(new Track(ride.track), 'speed') : '';
 ---
 
 <Layout title={ride ? `${ride.name} — Ride Tracker` : 'Ride not found'}>
@@ -99,6 +106,23 @@ const modes = mapModes();
             </div>
           </div>
           <script type="application/json" id="ride-track" is:inline set:html={JSON.stringify(ride.track)} />
+
+          <section class="charts" id="ride-charts" aria-label="Elevation and speed">
+            <figure class="chart" data-chart-kind="elevation">
+              <figcaption class="chart__cap">
+                <span class="chart__title">Elevation</span>
+                <output class="chart__readout" data-readout="elevation" />
+              </figcaption>
+              <div class="chart__plot" set:html={eleChart} />
+            </figure>
+            <figure class="chart" data-chart-kind="speed">
+              <figcaption class="chart__cap">
+                <span class="chart__title">Speed</span>
+                <output class="chart__readout" data-readout="speed" />
+              </figcaption>
+              <div class="chart__plot" set:html={speedChart} />
+            </figure>
+          </section>
 
           <div class="tiles detail-tiles">
             {tiles.map((t) => (
