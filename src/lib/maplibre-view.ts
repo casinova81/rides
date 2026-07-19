@@ -27,6 +27,25 @@ const DEM_URL = 'https://tiles.mapterhorn.com/tilejson.json';
 const DEM_SOURCE = 'dem';
 const HILLSHADE_LAYER = 'hillshade';
 const TRACK_COLOR = '#e6413c'; // the ridden line on the map (matches the .ride-marker CSS)
+
+// Basemap toggle (issue 07): the vector Liberty style vs. an opaque satellite raster.
+// Esri World Imagery — keyless (like every other tile source here), 256 px tiles.
+// The raster layer sits above the vector basemap + hillshade but below the track, so
+// flipping its visibility swaps the whole base out from under the red line. It rides
+// terrain in the 3D/chase modes for free (draped like any raster). Orthogonal to
+// camera mode: the choice persists across every in-place setMode within this engine.
+const BASE_MAP = 'map';
+const BASE_SATELLITE = 'satellite';
+const SAT_SOURCE = 'satellite';
+const SAT_LAYER = 'satellite';
+const SAT_TILES = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+const SAT_ATTRIBUTION =
+  'Imagery © <a href="https://www.esri.com/">Esri</a>, Maxar, Earthstar Geographics';
+
+const BASEMAPS: ReadonlyArray<MapMode> = [
+  { id: BASE_MAP, label: 'Map' },
+  { id: BASE_SATELLITE, label: 'Satellite' },
+];
 // A click seeks playback only when it lands within this many screen pixels of the
 // track line — clicking empty map (to focus/pan) must not jump the cursor.
 const SEEK_CLICK_RADIUS_PX = 25;
@@ -48,6 +67,7 @@ function makeMarkerEl(): HTMLDivElement {
 
 export const maplibreFactory: MapViewFactory = {
   modes: MODES,
+  basemaps: BASEMAPS,
 
   async create(container, track: Track, opts): Promise<MapView> {
     const maplibregl = (await import('maplibre-gl')).default;
@@ -78,6 +98,7 @@ export const maplibreFactory: MapViewFactory = {
     });
 
     let mode = FOLLOW_2D;
+    let basemap = opts.basemap === BASE_SATELLITE ? BASE_SATELLITE : BASE_MAP;
     // The liberty style's 3D building extrusions can occlude the marker at street
     // level in chase mode (issue 07 caveat) → hidden while chasing. Collected from
     // the style so we don't hard-code layer ids.
@@ -128,6 +149,22 @@ export const maplibreFactory: MapViewFactory = {
           source: DEM_SOURCE,
           paint: { 'hillshade-exaggeration': 0.35 },
         });
+        // Satellite raster: above the vector basemap + hillshade, below the track
+        // (added next). Hidden by default; setBasemap flips its visibility. It is
+        // opaque, so making it visible hides everything under it in one property set.
+        map.addSource(SAT_SOURCE, {
+          type: 'raster',
+          tiles: [SAT_TILES],
+          tileSize: 256,
+          maxzoom: 19,
+          attribution: SAT_ATTRIBUTION,
+        });
+        map.addLayer({
+          id: SAT_LAYER,
+          type: 'raster',
+          source: SAT_SOURCE,
+          layout: { visibility: basemap === BASE_SATELLITE ? 'visible' : 'none' },
+        });
         map.addSource('track', {
           type: 'geojson',
           data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coords } },
@@ -165,6 +202,19 @@ export const maplibreFactory: MapViewFactory = {
         );
         // Hide the occluding 3D buildings only while chasing (issue 07 caveat).
         setBuildingsVisible(modeId !== CHASE);
+      },
+
+      // Orthogonal to setMode (issue 07): flip the opaque satellite raster on/off.
+      // Persists across camera-mode changes because the view instance survives them.
+      setBasemap(basemapId: string) {
+        basemap = basemapId;
+        if (map.getLayer(SAT_LAYER)) {
+          map.setLayoutProperty(
+            SAT_LAYER,
+            'visibility',
+            basemapId === BASE_SATELLITE ? 'visible' : 'none',
+          );
+        }
       },
 
       // Absolute placement (issue 09): jumpTo cancels any easing/inertia, so the

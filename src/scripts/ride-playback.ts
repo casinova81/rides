@@ -1,7 +1,13 @@
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { Track } from '../lib/track';
 import { PlaybackCore } from '../lib/playback';
-import { mapModes, viewForMode, type MapView, type MapViewFactory } from '../lib/mapview';
+import {
+  mapModes,
+  mapBasemaps,
+  viewForMode,
+  type MapView,
+  type MapViewFactory,
+} from '../lib/mapview';
 import { fmtDuration } from '../lib/format';
 import { mountCharts } from './ride-charts';
 import type { RidePose, Track as TrackData } from '../lib/types';
@@ -24,6 +30,7 @@ export async function mountRidePlayback(): Promise<void> {
   const timeEl = document.getElementById('pb-time');
   const speedGroup = document.getElementById('pb-speeds');
   const modeGroup = document.getElementById('pb-modes');
+  const basemapGroup = document.getElementById('pb-basemaps');
   if (!dataEl || !container || !hero || !bar || !playBtn || !scrub) return;
 
   let trackData: TrackData;
@@ -46,21 +53,44 @@ export async function mountRidePlayback(): Promise<void> {
   // The live engine — the pivot for the swap-vs-setMode decision below (see `viewForMode`).
   let currentFactory: MapViewFactory | null = null;
 
+  // The basemap is orthogonal to camera mode (issue 07): one choice shared across
+  // every MapLibre mode, remembered here so it survives both in-place setMode changes
+  // and full engine swaps (a rebuild restores it via create's `basemap` opt). Defaults
+  // to the first advertised basemap (Map).
+  let currentBasemap = mapBasemaps()[0]?.id ?? 'map';
+
   // The map-cursor → shared-cursor channel (ticket 4d). Late-bound: the map is built
   // in the background, but it only ever fires this at runtime, by when `onCursor`
   // points at the real seek. Clicking the track line seeks playback, which moves the
   // charts too — closing the chart↔map↔playback loop.
   let onCursor: (dist: number) => void = () => {};
 
+  // The basemap toggle only makes sense for engines that advertise basemaps (Cesium's
+  // globe carries its own imagery), so it's shown/hidden per live engine. When shown,
+  // its active button reflects the remembered `currentBasemap`.
+  const syncBasemapToggle = (factory: MapViewFactory | null): void => {
+    if (!basemapGroup) return;
+    const supported = (factory?.basemaps?.length ?? 0) > 0;
+    basemapGroup.hidden = !supported;
+    if (!supported) return;
+    basemapGroup
+      .querySelectorAll<HTMLElement>('[data-basemap]')
+      .forEach((b) => b.classList.toggle('active', b.dataset.basemap === currentBasemap));
+  };
+
   /** Build (or rebuild) the live view for `modeId`, replacing any current one. */
   const buildView = async (modeId: string): Promise<void> => {
     const choice = choices.find((c) => c.mode.id === modeId) ?? choices[0];
     const next = await choice.view.create(container, track, {
       onSeek: (dist) => onCursor(dist),
+      // Restore the remembered basemap at build time so a rebuild (e.g. back from the
+      // globe) shows the right base with no vector-then-satellite flash.
+      basemap: currentBasemap,
     });
     next.setMode(choice.mode.id);
     view = next;
     currentFactory = choice.view;
+    syncBasemapToggle(choice.view);
     // The map is live now — hide the static SVG placeholder (idempotent across swaps).
     hero.classList.add('hero--live');
   };
@@ -183,6 +213,19 @@ export async function mountRidePlayback(): Promise<void> {
         swapping = false;
         renderOnce();
       });
+  });
+
+  basemapGroup?.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest<HTMLElement>('[data-basemap]');
+    if (!btn || !btn.dataset.basemap) return;
+    currentBasemap = btn.dataset.basemap;
+    basemapGroup
+      .querySelectorAll<HTMLElement>('[data-basemap]')
+      .forEach((b) => b.classList.toggle('active', b === btn));
+    // In-place swap on the live view — no rebuild, orthogonal to camera mode. If no
+    // view is live yet (still building), the next buildView applies it via create.
+    view?.setBasemap?.(currentBasemap);
+    renderOnce();
   });
 
   scrub.addEventListener('input', () => {

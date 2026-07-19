@@ -17,8 +17,16 @@ export interface MapMode {
 }
 
 export interface MapViewFactory {
-  /** Advertised to the toggle, in order; the first is the default. */
+  /** Advertised to the camera-mode toggle, in order; the first is the default. */
   modes: ReadonlyArray<MapMode>;
+  /**
+   * Base layers this engine can swap under the track, orthogonal to camera mode
+   * (issue 07 basemap toggle). Advertised to the basemap toggle, in order; the
+   * first is the default. Omitted by engines with a single fixed basemap (Cesium's
+   * globe already carries its own imagery), so the controller hides the toggle for
+   * them. MapLibre advertises Map (vector) + Satellite (imagery).
+   */
+  basemaps?: ReadonlyArray<MapMode>;
   /**
    * Build a live view in `container` for `track`. Async so an engine's bundle can
    * lazy-load (the MapLibre chunk `import()`s here, not at module load). The view
@@ -36,12 +44,24 @@ export interface MapViewFactory {
        * chart↔map↔playback loop. Click-only by design — hovering never scrubs.
        */
       onSeek?: (distance: number) => void;
+      /**
+       * Initial basemap id (issue 07). Lets a rebuild restore the user's basemap
+       * choice with no vector flash — the raster is created already visible rather
+       * than toggled on after load. Ignored by engines without `basemaps`.
+       */
+      basemap?: string;
     },
   ): Promise<MapView>;
 }
 
 export interface MapView {
   setMode(modeId: string): void;
+  /**
+   * Swap the base layer under the track (issue 07 basemap toggle). Present only on
+   * engines that advertise `basemaps`; orthogonal to `setMode`, so a basemap choice
+   * survives every in-place camera-mode change within one engine.
+   */
+  setBasemap?(basemapId: string): void;
   /** Absolute: place the camera exactly here, never ease. Views hold no pose state. */
   updateFrame(pose: RidePose): void;
   /** Fully reclaim the engine (WebGL context, listeners, DOM). */
@@ -65,6 +85,26 @@ export interface ModeChoice {
 /** Flat-map every view's advertised modes into the toggle's ordered button list. */
 export function mapModes(views: ReadonlyArray<MapViewFactory> = mapViews): ModeChoice[] {
   return views.flatMap((view) => view.modes.map((mode) => ({ view, mode })));
+}
+
+/**
+ * Every distinct basemap any engine advertises, in order — the static button list
+ * for the basemap toggle. Deduped by id (a basemap common to two engines is one
+ * button); the controller shows the toggle only while the live engine advertises
+ * basemaps, so an engine without them (Cesium) simply hides it.
+ */
+export function mapBasemaps(views: ReadonlyArray<MapViewFactory> = mapViews): MapMode[] {
+  const seen = new Set<string>();
+  const out: MapMode[] = [];
+  for (const view of views) {
+    for (const base of view.basemaps ?? []) {
+      if (!seen.has(base.id)) {
+        seen.add(base.id);
+        out.push(base);
+      }
+    }
+  }
+  return out;
 }
 
 /**

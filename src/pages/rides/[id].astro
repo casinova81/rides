@@ -12,7 +12,7 @@ import { trackHeroSVG } from '../../lib/thumb';
 import { chartSVG } from '../../lib/chart';
 import { Track } from '../../lib/track';
 import { SPEED_STEPS } from '../../lib/playback';
-import { mapModes } from '../../lib/mapview';
+import { mapModes, mapBasemaps } from '../../lib/mapview';
 
 // The ride detail page (tickets 4a + 4b): full stats for one ride, a live map
 // hero with 2D-follow playback, and delete. Reads the per-ride payload from D1
@@ -38,6 +38,10 @@ const splits = ride ? splitRows(ride.splits) : [];
 // The camera-mode toggle is the flat-mapped engine registry (issue 09), rendered
 // server-side so the ordered mode list is the single source of truth. First = default.
 const modes = mapModes();
+// The basemap toggle (issue 07) is orthogonal to camera mode: one Map/Satellite
+// choice shared across the MapLibre modes. Rendered server-side from the same
+// registry; the controller hides it for engines without basemaps (the globe).
+const basemaps = mapBasemaps();
 // Elevation + speed charts (ticket 4d), rendered server-side from the same pure
 // geometry the client re-derives to hit-test hover x → distance. Static without JS;
 // the controller upgrades them with a synced cursor.
@@ -96,6 +100,19 @@ const speedChart = ride ? chartSVG(new Track(ride.track), 'speed') : '';
                     data-mode={c.mode.id}
                   >
                     {c.mode.label}
+                  </button>
+                ))
+              }
+            </div>
+            <div class="pb-modes" id="pb-basemaps" role="group" aria-label="Basemap">
+              {
+                basemaps.map((b, i) => (
+                  <button
+                    class={`pb-mode${i === 0 ? ' active' : ''}`}
+                    type="button"
+                    data-basemap={b.id}
+                  >
+                    {b.label}
                   </button>
                 ))
               }
