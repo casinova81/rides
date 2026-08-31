@@ -21,8 +21,10 @@ describe('deriveRide — airport.gpx contract numbers', () => {
 
   it('matches the prototype-validated stats', () => {
     expect((payload.stats.distance / 1000).toFixed(1)).toBe('57.9');
-    expect(payload.stats.movingTime).toBe(12327); // 3:25:27
-    expect(payload.stats.duration).toBe(12327);
+    // Komoot auto-pauses, so breaks are single long gaps between riding-speed
+    // points; the raw-interval guard keeps them out of moving time.
+    expect(payload.stats.movingTime).toBe(10060); // 2:47:40
+    expect(payload.stats.duration).toBe(12327); // 3:25:27 elapsed → 37:47 idle
     expect(payload.stats.elevationGain).toBe(97); // ↑97 m
   });
 
@@ -77,6 +79,20 @@ describe('deriveRide — locked rules on synthetic fixtures', () => {
       lineGpx(Array.from({ length: 20 }, (_, i) => ({ m: i * 100, s: i * 10 }))),
     );
     expect(noStop.payload.stats.movingTime).toBe(noStop.payload.stats.duration);
+  });
+
+  it('excludes a Komoot auto-pause gap (one long interval, no distance covered)', () => {
+    // fast → a single 600 s gap at the same spot → fast. The 5-pt smoother
+    // bridges the gap point with riding speeds; the raw interval speed must not.
+    const before = Array.from({ length: 10 }, (_, i) => ({ m: i * 100, s: i * 10 }));
+    const after = Array.from({ length: 10 }, (_, i) => ({ m: 900 + i * 100, s: 690 + i * 10 }));
+    const paused = deriveRide(lineGpx([...before, ...after]));
+    const idle = paused.payload.stats.duration - paused.payload.stats.movingTime;
+    expect(idle).toBe(600);
+    expect(paused.payload.stats.avgMovingSpeed).toBeCloseTo(
+      paused.payload.stats.distance / paused.payload.stats.movingTime,
+      2,
+    );
   });
 
   it('banks elevation only past the 2 m hysteresis threshold', () => {

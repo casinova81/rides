@@ -31,6 +31,7 @@ export function rideCardHTML(summary: IndexSummary, opts: RideCardOptions = {}):
       ${stat('Elevation', `↑ ${fmtElevation(stats.elevationGain)}`)}
       ${stat('Avg speed', fmtSpeedKmh(stats.avgMovingSpeed))}
       ${stat('Moving', fmtDuration(stats.movingTime))}
+      ${stat('Idle', fmtDuration(stats.duration - stats.movingTime))}
     </div>
   </div>
 </a>`;

@@ -14,7 +14,7 @@ const summary: IndexSummary = {
   start: '2026-07-05T10:00:57Z',
   stats: {
     distance: 57900,
-    duration: 12327,
+    duration: 13527,
     movingTime: 12327,
     avgMovingSpeed: 4.7,
     maxSpeed: 11.4,
@@ -36,6 +36,8 @@ describe('rideCardHTML', () => {
     expect(html).toContain('05.07.2026');
     expect(html).toContain('57,9 km'); // distance
     expect(html).toContain('97 m'); // elevation gain
+    expect(html).toContain('3:25:27'); // moving time
+    expect(html).toContain('20:00'); // idle time (duration − moving)
     expect(html).toContain('<svg'); // route thumbnail
   });
 

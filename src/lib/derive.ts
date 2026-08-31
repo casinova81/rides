@@ -8,7 +8,9 @@ import { SCHEMA_VERSION } from './types';
 // payload plus its index polyline. Runs client-side at upload time (issue 02);
 // the Worker only validates and stores. All algorithms are locked:
 //  - 5-point speed smoothing over point-to-point speeds
-//  - moving = smoothed speed ≥ 2 km/h
+//  - moving = smoothed AND raw interval speed ≥ 2 km/h (the raw guard keeps the
+//    smoother from bridging Komoot auto-pause gaps, where a break is one long
+//    interval between two riding-speed points)
 //  - elevation via 5-point smoothing + 2 m hysteresis
 //  - gradients over a 100 m rolling window
 //  - per-km splits with a real-length final partial
@@ -83,6 +85,7 @@ function computeStats(
   dist: number[],
   tF: number[],
   speed: number[],
+  vRaw: number[],
   ele: number[],
   grad: number[],
 ): RideStats {
@@ -92,7 +95,9 @@ function computeStats(
 
   let movingTime = 0;
   for (let i = 1; i < n; i++) {
-    if (speed[i] >= MOVING_THRESHOLD) movingTime += tF[i] - tF[i - 1];
+    if (speed[i] >= MOVING_THRESHOLD && vRaw[i] >= MOVING_THRESHOLD) {
+      movingTime += tF[i] - tF[i - 1];
+    }
   }
 
   let gain = 0;
@@ -202,7 +207,7 @@ export function deriveRide(gpxText: string): DerivedRide {
   const ele = roll5(points.map((p) => p.ele));
   const grad = computeGradients(dist, ele);
 
-  const stats = computeStats(dist, tF, speed, ele, grad);
+  const stats = computeStats(dist, tF, speed, vRaw, ele, grad);
   const splits = computeSplits(dist, tF, ele);
   const bests: Bests = {
     '5k': fastestWindow(dist, tF, 5000),

@@ -70,6 +70,7 @@ describe('ride-detail — secondary stats', () => {
     const stats = secondaryStats(payload);
     expect(stats).toEqual([
       { label: 'Elapsed time', value: '1:06:40' },
+      { label: 'Idle time', value: '6:40' },
       { label: 'Elevation loss', value: '↓ 84 m' },
       { label: 'Top speed', value: '40,0 km/h' },
       { label: 'Max gradient', value: '7,2 %' },

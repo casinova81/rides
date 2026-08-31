@@ -28,7 +28,7 @@ Private single-user ride-tracking site: Komoot GPX upload, stats, MapLibre playb
 
 Keep `@cloudflare/vitest-pool-workers` pinned at 0.12.x.
 
-`airport.gpx` at the repo root is the reference fixture; its derived numbers (57,9 km, 3:25:27 moving, ↑97 m) are the validated contract for the derivation pipeline. Synthetic fixtures live in `test/gpx-fixtures.ts`.
+`airport.gpx` at the repo root is the reference fixture; its derived numbers (57,9 km, 3:25:27 elapsed, 2:47:40 moving, ↑97 m) are the validated contract for the derivation pipeline. Synthetic fixtures live in `test/gpx-fixtures.ts`.
 
 ## Architecture
 

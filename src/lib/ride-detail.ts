@@ -45,6 +45,7 @@ export function secondaryStats(payload: RidePayload): StatItem[] {
   const s = payload.stats;
   return [
     { label: 'Elapsed time', value: fmtDuration(s.duration) },
+    { label: 'Idle time', value: fmtDuration(s.duration - s.movingTime) },
     { label: 'Elevation loss', value: `↓ ${fmtElevation(s.elevationLoss)}` },
     { label: 'Top speed', value: fmtSpeedKmh(s.maxSpeed) },
     { label: 'Max gradient', value: fmtGradient(s.maxGradient) },
