@@ -20,7 +20,9 @@ describe('deriveRide — airport.gpx contract numbers', () => {
   });
 
   it('matches the prototype-validated stats', () => {
-    expect((payload.stats.distance / 1000).toFixed(1)).toBe('57.9');
+    // 57.8 km after outlier rejection (one zigzag glitch removed ~30 phantom m)
+    expect((payload.stats.distance / 1000).toFixed(1)).toBe('57.8');
+    expect(payload.stats.maxSpeed).toBe(12.53); // 45.1 km/h — was 60.6 pre-rejection
     // Komoot auto-pauses, so breaks are single long gaps between riding-speed
     // points; the raw-interval guard keeps them out of moving time.
     expect(payload.stats.movingTime).toBe(10060); // 2:47:40
@@ -46,7 +48,7 @@ describe('deriveRide — airport.gpx contract numbers', () => {
 
   it('stores a columnar track and a compact polyline', () => {
     const t = payload.track;
-    expect(t.lat.length).toBe(4258);
+    expect(t.lat.length).toBe(4257); // 4258 raw − 1 zigzag outlier
     expect(t.lat.length).toBe(t.lon.length);
     expect(t.lat.length).toBe(t.speed.length);
     expect(t.t[0]).toBe(0);
@@ -93,6 +95,47 @@ describe('deriveRide — locked rules on synthetic fixtures', () => {
       paused.payload.stats.distance / paused.payload.stats.movingTime,
       2,
     );
+  });
+
+  it('drops a single GPS zigzag outlier (position teleports away and back)', () => {
+    // steady 10 m/s line; point 10 displaced 300 m sideways → implied ~114 km/h
+    const pts = Array.from({ length: 20 }, (_, i) => ({
+      lat: i === 10 ? 0.0027 : 0,
+      lon: metersToLon(i * 100),
+      ele: 0,
+      t: i * 10,
+    }));
+    const ride = deriveRide(makeGpx(pts));
+    expect(ride.payload.track.lat.length).toBe(19); // outlier gone
+    expect(ride.payload.stats.maxSpeed * 3.6).toBeLessThan(40); // ~36 km/h, not ~114
+    expect(ride.payload.stats.distance).toBeLessThan(1920); // no phantom detour
+  });
+
+  it('drops a two-point zigzag burst (rejoin within the lookahead)', () => {
+    const pts = Array.from({ length: 20 }, (_, i) => ({
+      lat: i === 10 || i === 11 ? 0.0027 : 0,
+      lon: metersToLon(i * 100),
+      ele: 0,
+      t: i * 10,
+    }));
+    const ride = deriveRide(makeGpx(pts));
+    expect(ride.payload.track.lat.length).toBe(18);
+    expect(ride.payload.stats.maxSpeed * 3.6).toBeLessThan(40);
+  });
+
+  it('keeps a persistent level shift but neutralises its teleport speed', () => {
+    // GPS re-anchors 600 m north mid-ride and stays there: points are kept,
+    // but the impossible jump must not become the top speed.
+    const pts = Array.from({ length: 20 }, (_, i) => ({
+      lat: i < 10 ? 0 : 0.0054,
+      lon: metersToLon(i * 100),
+      ele: 0,
+      t: i * 10,
+    }));
+    const ride = deriveRide(makeGpx(pts));
+    expect(ride.payload.track.lat.length).toBe(20); // nothing dropped
+    expect(ride.payload.stats.distance).toBeGreaterThan(2400); // step retained once
+    expect(ride.payload.stats.maxSpeed * 3.6).toBeLessThan(40); // not ~219 km/h
   });
 
   it('banks elevation only past the 2 m hysteresis threshold', () => {

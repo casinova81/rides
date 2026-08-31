@@ -1,4 +1,4 @@
-import { parseGpx } from './gpx';
+import { parseGpx, type TrackPoint } from './gpx';
 import { haversine } from './geo';
 import { toIndexPolyline } from './polyline';
 import type { RidePayload, RideStats, Split, Bests, Best, Track, IndexSummary } from './types';
@@ -17,10 +17,18 @@ import { SCHEMA_VERSION } from './types';
 //  - fastest rolling 5/10/20 km windows, null when the ride is shorter
 //  - max speed from the smoothed series
 //  - point speeds derived from UNROUNDED timestamps
+//  - GPS outliers: zigzag excursions (>100 km/h away and back within a few
+//    points) are dropped before deriving; a surviving over-cap interval is a
+//    re-anchor teleport, not motion — its raw speed is zeroed so it reads as
+//    a pause and can never fake a top speed
 
 const MOVING_THRESHOLD = 2 / 3.6; // 2 km/h in m/s
 const HYSTERESIS_M = 2;
 const GRADIENT_HALF_WINDOW_M = 50; // ±50 m = 100 m window
+const OUTLIER_SPEED = 100 / 3.6; // 100 km/h in m/s — no bicycle interval is faster
+const OUTLIER_LOOKAHEAD = 5; // points to scan for the track returning to the anchor
+const REJOIN_SPEED = 15; // m/s — how far the rider can truly get during an excursion
+const MAX_EXCURSION_S = 30; // an excursion longer than this is a level shift, kept
 
 export interface DerivedRide {
   payload: RidePayload;
@@ -31,6 +39,47 @@ const round = (x: number, dp = 0): number => {
   const f = 10 ** dp;
   return Math.round(x * f) / f;
 };
+
+/** Speed (m/s) a straight hop between two points would imply. */
+const impliedSpeed = (a: TrackPoint, b: TrackPoint): number =>
+  haversine(a, b) / Math.max(1e-9, b.time - a.time);
+
+/**
+ * Drop GPS zigzag outliers. A glitch shows as an excursion: the track
+ * teleports away from the last kept point at an impossible speed (>100 km/h)
+ * and comes BACK — a later point sits within the distance the rider could
+ * truly have covered meanwhile (≤ REJOIN_SPEED), inside a short window. The
+ * excursion points are dropped and the track rejoins there. A jump that never
+ * returns (a genuine re-anchor after signal loss) is kept; its fictitious
+ * interval speed is neutralised separately in deriveRide.
+ */
+export function dropGpsOutliers(points: TrackPoint[]): TrackPoint[] {
+  if (points.length < 3) return points;
+  const out: TrackPoint[] = [points[0]];
+  let i = 1;
+  while (i < points.length) {
+    const anchor = out[out.length - 1];
+    if (impliedSpeed(anchor, points[i]) > OUTLIER_SPEED) {
+      const end = Math.min(i + OUTLIER_LOOKAHEAD, points.length - 1);
+      let rejoin = -1;
+      for (let j = i + 1; j <= end; j++) {
+        const dt = points[j].time - anchor.time;
+        if (dt > MAX_EXCURSION_S) break;
+        if (haversine(anchor, points[j]) <= REJOIN_SPEED * dt) {
+          rejoin = j;
+          break;
+        }
+      }
+      if (rejoin !== -1) {
+        i = rejoin; // drop i .. rejoin-1
+        continue;
+      }
+    }
+    out.push(points[i]);
+    i++;
+  }
+  return out;
+}
 
 /** 5-point centred rolling average. */
 function roll5(arr: number[]): number[] {
@@ -190,7 +239,8 @@ function fastestWindow(dist: number[], tF: number[], windowM: number): Best | nu
 }
 
 export function deriveRide(gpxText: string): DerivedRide {
-  const { name, sport, points } = parseGpx(gpxText);
+  const { name, sport, points: rawPoints } = parseGpx(gpxText);
+  const points = dropGpsOutliers(rawPoints);
   const n = points.length;
   const t0 = points[0].time;
 
@@ -202,6 +252,9 @@ export function deriveRide(gpxText: string): DerivedRide {
   const vRaw = points.map((_, i) =>
     i === 0 ? 0 : (dist[i] - dist[i - 1]) / Math.max(1e-9, tF[i] - tF[i - 1]),
   );
+  // A surviving over-cap interval is a GPS re-anchor, not motion: zero it so
+  // the smoother can't smear a fake top speed and the interval counts as idle.
+  for (let i = 1; i < n; i++) if (vRaw[i] > OUTLIER_SPEED) vRaw[i] = 0;
   vRaw[0] = vRaw[1] ?? 0;
   const speed = roll5(vRaw);
   const ele = roll5(points.map((p) => p.ele));
