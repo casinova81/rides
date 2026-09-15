@@ -68,6 +68,7 @@ Mode changes split by ownership (issue 09): a mode owned by the *live* engine sw
 - Bounds go in the Map constructor; call `map.remove()` on teardown; one `ResizeObserver → resize()` per map; run the rAF loop only while playing.
 - The map container needs a position selector of ≥2-class specificity or `.maplibregl-map` collapses it to 0 height (black map).
 - For binned/short-edge GeoJSON layers (heatmap), set `tolerance: 0` on the source — geojson-vt drops short segments at low zoom otherwise.
+- A DOM `Marker` on terrain must be re-projected on the map's `render` event (see `maplibre-view.ts`): MapLibre places markers on `move` with the pre-render transform, then resets the centre elevation from the DEM before painting — and `jumpTo` with a fractional zoom (our locked 14.5) sets that elevation to 0 first, because its lookup only resolves integer tile zooms. Without the re-sync the arrow floats ~13 px above the draped line in 3D.
 - MapLibre renders in the Claude Code browser pane, but screenshots don't capture the WebGL canvas — verify via `queryRenderedFeatures` instead.
 
 ### Conventions

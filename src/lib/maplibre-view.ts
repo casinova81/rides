@@ -95,6 +95,21 @@ export const maplibreFactory: MapViewFactory = {
       element: makeMarkerEl(),
       rotationAlignment: 'map',
       pitchAlignment: 'map',
+      // Placed every frame; rounding to whole pixels would add jitter.
+      subpixelPositioning: true,
+    });
+
+    // Terrain re-sync (map rule, found in the wild): MapLibre positions a DOM Marker
+    // on `move` with the *pre-render* transform, but `_render` then resets the centre
+    // elevation from the DEM before painting — and `jumpTo` with a fractional zoom
+    // (our locked 14.5) first sets it to 0, because the elevation lookup only
+    // resolves integer tile zooms. So in 3D the canvas is painted with a different
+    // camera elevation than the marker was placed with, and the arrow floats ~13 px
+    // above the draped line on every frame (and stays there when paused).
+    // Re-projecting after each paint puts the marker exactly where the painted frame
+    // has the ground. Flat 2D has no elevation, so the move-time placement is right.
+    map.on('render', () => {
+      if (map.terrain) marker.setLngLat(marker.getLngLat());
     });
 
     let mode = FOLLOW_2D;
