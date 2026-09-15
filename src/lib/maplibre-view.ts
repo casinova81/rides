@@ -1,4 +1,4 @@
-import type { Map as MlMap, Marker as MlMarker } from 'maplibre-gl';
+import type { Map as MlMap, Marker as MlMarker, LngLatLike, CameraOptions } from 'maplibre-gl';
 import type { Track } from './track';
 import type { RidePose } from './types';
 import type { MapView, MapViewFactory, MapMode } from './mapview';
@@ -208,6 +208,18 @@ export const maplibreFactory: MapViewFactory = {
       }
     };
 
+    // The centre elevation MapLibre will paint with (map rule): `_render` resets the
+    // transform's centre elevation from the DEM at the integer tile zoom on every
+    // frame, and `jumpTo` with a fractional zoom looks it up wrongly (→ 0 m). Passing
+    // the same value explicitly makes the move-time marker placement agree with the
+    // painted frame; the `render` re-sync above covers late DEM tile loads.
+    const paintedElevation = (center: [number, number] | LngLatLike, zoom: number): number | undefined =>
+      map.terrain
+        ? map.terrain.getElevationForLngLatZoom(maplibregl.LngLat.convert(center), Math.floor(zoom))
+        : undefined;
+    const withElevation = (opts: CameraOptions, elevation: number | undefined): CameraOptions =>
+      elevation === undefined ? opts : { ...opts, elevation };
+
     return {
       setMode(modeId: string) {
         mode = modeId;
@@ -239,7 +251,12 @@ export const maplibreFactory: MapViewFactory = {
         if (mode === FOLLOW_2D) {
           map.jumpTo({ center: pose.lngLat, zoom: FOLLOW_ZOOM, pitch: 0, bearing: 0 });
         } else if (mode === TILT_3D) {
-          map.jumpTo({ center: pose.lngLat, zoom: TILT_ZOOM, pitch: TILT_PITCH, bearing: 0 });
+          map.jumpTo(
+            withElevation(
+              { center: pose.lngLat, zoom: TILT_ZOOM, pitch: TILT_PITCH, bearing: 0 },
+              paintedElevation(pose.lngLat, TILT_ZOOM),
+            ),
+          );
         } else {
           // Chase: camera behind + above the marker, altitude clamped from GPX
           // elevations (never queryTerrainElevation), via calculateCameraOptionsFromTo.
@@ -250,7 +267,13 @@ export const maplibreFactory: MapViewFactory = {
             new maplibregl.LngLat(pose.lngLat[0], pose.lngLat[1]),
             cam.targetAltitude,
           );
-          map.jumpTo(camOpts);
+          // calculateCameraOptionsFromTo sets `elevation` to the GPX target altitude;
+          // replace it with the DEM value the paint will use (see paintedElevation).
+          map.jumpTo(
+            camOpts.center && camOpts.zoom !== undefined
+              ? withElevation(camOpts, paintedElevation(camOpts.center, camOpts.zoom))
+              : camOpts,
+          );
         }
       },
 
