@@ -61,7 +61,7 @@ Both engine bundles are lazy-`import()`ed inside `create`, so a ride only downlo
 
 Mode changes split by ownership (issue 09): a mode owned by the *live* engine switches in place via `view.setMode()` (no teardown — every 2D↔3D↔chase toggle, since MapLibre owns all three); switching to a mode owned by a *different* engine (the Globe) swaps the whole view (`destroy` → `create` → `setMode`). Either way the clock keeps running. `viewForMode(modeId)` in `mapview.ts` is the pivot; the controller compares it to the live factory.
 
-`src/scripts/` holds the client-side controllers Astro pages load (playback, charts, compare, heatmap); `src/lib/` stays pure and unit-testable. Chart↔map↔playback cursor sync is bidirectional and distance-keyed; the map cursor is click-only (hover never scrubs).
+`src/scripts/` holds the client-side controllers Astro pages load (playback, charts, speed HUD, compare, heatmap); `src/lib/` stays pure and unit-testable. Chart↔map↔playback cursor sync is bidirectional and distance-keyed; the map cursor is click-only (hover never scrubs). The speed HUD (`speed-hud.ts` in both dirs) floats over the hero: current km/h over a *time-keyed* ±30 s sparkline on a fixed per-ride y scale, centred on the shared cursor's ride time; display-only, engine-independent.
 
 ### Map rules (prototype-earned, issue 07)
 

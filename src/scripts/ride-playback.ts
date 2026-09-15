@@ -10,6 +10,7 @@ import {
 } from '../lib/mapview';
 import { fmtDuration } from '../lib/format';
 import { mountCharts } from './ride-charts';
+import { mountSpeedHud } from './speed-hud';
 import type { RidePose, Track as TrackData } from '../lib/types';
 
 // The ride-detail playback controller (ticket 4b + 4c). Wires the engine-agnostic
@@ -113,6 +114,12 @@ export async function mountRidePlayback(): Promise<void> {
   // state beyond the playback clock — that is the single shared cursor.
   const charts = mountCharts(track, (dist) => seekToDist(dist));
 
+  // The speed HUD over the map corner: the current km/h plus a ±30 s sparkline of
+  // the ride's own speed series. Display-only — like the charts it reads the track
+  // at the shared cursor and holds no state, so it needs nothing from the engine
+  // and stays live across every view swap.
+  const hud = mountSpeedHud(track);
+
   const setPlayLabel = () => {
     playBtn.textContent = core.playing ? '⏸' : '▶';
     playBtn.setAttribute('aria-label', core.playing ? 'Pause' : 'Play');
@@ -129,6 +136,7 @@ export async function mountRidePlayback(): Promise<void> {
     // Chart cursors track the same pose — the readout shows the track's own value at
     // this distance (not the smoothed camera elevation), so the numbers are honest.
     charts.update(pose.distance);
+    hud.update(pose.distance);
     if (!scrubbing) scrub.value = String(Math.round(core.progress * scrubMax));
     setClock();
     setPlayLabel();
@@ -256,6 +264,7 @@ export async function mountRidePlayback(): Promise<void> {
   setClock();
   setPlayLabel();
   charts.update(0);
+  hud.update(0);
   swapping = true;
   void buildView(choices[0].mode.id)
     .catch((err) => console.error('Ride map failed to load:', err))

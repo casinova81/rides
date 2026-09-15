@@ -39,7 +39,7 @@ A private (password-protected) ride-tracking site built with **Astro on Cloudfla
 
 ## Out of scope
 
-- **Live bike-computer stats overlay during playback** and **auto-flyover cinematic intro** — offered during charting, declined for now.
+- **Auto-flyover cinematic intro** — offered during charting, declined for now. (The live stats overlay was also declined then, but a first cut — current km/h over a ±30 s time-keyed speed sparkline in the hero corner — was requested and built on 2026-09-15; see `src/lib/speed-hud.ts`.)
 - **Building the CesiumJS globe view** — only the architectural seam is in scope; the Cesium view itself would be a fresh effort.
 - **Non-Komoot inputs** (FIT files, Garmin/Strava extensions, heart rate/cadence stats) — source is always Komoot.
 - **Multi-user / social features** — the site is for one person, behind a password.

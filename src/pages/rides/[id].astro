@@ -13,12 +13,14 @@ import { chartSVG } from '../../lib/chart';
 import { Track } from '../../lib/track';
 import { SPEED_STEPS } from '../../lib/playback';
 import { mapModes, mapBasemaps } from '../../lib/mapview';
+import { HUD_W, HUD_H } from '../../lib/speed-hud';
 
 // The ride detail page (tickets 4a + 4b): full stats for one ride, a live map
 // hero with 2D-follow playback, and delete. Reads the per-ride payload from D1
 // per request (dynamic — a freshly-uploaded ride is viewable with no rebuild).
 // The static SVG route line is the pre-JS / map-load-failure fallback; the client
-// controller upgrades the hero to a live map. Delete hits the Worker endpoint and
+// controller upgrades the hero to a live map and reveals the speed HUD (a live
+// km/h readout over a ±30 s time-keyed sparkline) in its corner. Delete hits the Worker endpoint and
 // lets records/totals self-heal on the next index read.
 export const prerender = false;
 
@@ -73,6 +75,23 @@ const speedChart = ride ? chartSVG(new Track(ride.track), 'speed') : '';
           <div class="hero hero--bleed" id="ride-hero">
             <div class="hero__placeholder" set:html={heroSvg} />
             <div class="hero__map" id="map-hero" role="application" aria-label="Ride playback map" />
+            <div class="hud" id="speed-hud" hidden aria-live="off" aria-label="Current speed">
+              <svg
+                class="hud__svg"
+                viewBox={`0 0 ${HUD_W} ${HUD_H}`}
+                preserveAspectRatio="none"
+                aria-hidden="true"
+              >
+                <path class="hud__area" id="hud-area" d="" />
+                <path class="hud__line" id="hud-line" d="" fill="none" vector-effect="non-scaling-stroke" />
+                <line class="hud__now" x1={HUD_W / 2} y1="0" x2={HUD_W / 2} y2={HUD_H} vector-effect="non-scaling-stroke" />
+              </svg>
+              <div class="hud__readout">
+                <span class="hud__value" id="hud-speed">0,0</span>
+                <span class="hud__unit">km/h</span>
+              </div>
+              <div class="hud__axis"><span>−30 s</span><span>+30 s</span></div>
+            </div>
           </div>
 
           <div class="wrap wrap--bottom">

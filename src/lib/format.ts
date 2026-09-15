@@ -24,7 +24,12 @@ export function fmtElevation(meters: number): string {
 
 /** Speed converted from m/s to km/h with one decimal, e.g. `13,8 km/h`. */
 export function fmtSpeedKmh(mps: number): string {
-  return `${oneDp.format(mps * 3.6)} km/h`;
+  return `${fmtKmhNumber(mps)} km/h`;
+}
+
+/** The bare km/h number with one decimal, e.g. `13,8` — for readouts that set the unit separately. */
+export function fmtKmhNumber(mps: number): string {
+  return oneDp.format(mps * 3.6);
 }
 
 const pad = (n: number) => String(n).padStart(2, '0');
