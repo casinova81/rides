@@ -16,6 +16,17 @@ Decide with Carsten:
 
 ## Answer
 
+**Update (2026-09-16, [GitHub issue #2](https://github.com/casinova81/rides/issues/2)):**
+The repository is now hosted on GitHub. The local-only hosting/deployment and
+no-CI decisions below are superseded: GitHub Actions typechecks, tests, and builds
+pull requests, then automatically deploys successful pushes to `main` using the
+existing `npm run deploy` pipeline. Scoped Cloudflare credentials live in Actions
+secrets; production runs are serialized. No preview deployments, storage changes,
+or changes to the Access gate. Local deployment remains an emergency fallback.
+See the [deployment setup](../../../README.md#github-actions-deployment).
+
+### Original decision (superseded where noted above)
+
 Resolved with Carsten (grilling, 2026-07-16):
 
 - **Code hosting**: local git repo at `~/Sites/rides` only — no remote. Code-loss risk consciously accepted (a dead laptop loses only source; ride data is safe in R2/D1, and the effort's specs allow a rebuild). GitHub/GitLab and any "dumb backup" remote were offered and declined.
